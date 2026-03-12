@@ -49,7 +49,9 @@ import {
   User as UserIcon,
   Shield,
   HardHat,
-  Info
+  Info,
+  ShieldCheck,
+  Users
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format, addHours, isAfter, parseISO } from 'date-fns';
@@ -216,7 +218,23 @@ export default function App() {
     }
   };
 
-  const handleLogout = () => signOut(auth);
+  const handleTestLogin = (role: UserRole) => {
+    const mockUser: UserProfile = {
+      uid: `test-${role}`,
+      email: `test-${role}@example.com`,
+      name: `Usuário Teste (${role === 'admin' ? 'Admin' : role === 'supervisor' ? 'Supervisor' : 'Operador'})`,
+      role: role
+    };
+    setUser(mockUser);
+  };
+
+  const handleLogout = () => {
+    if (user?.uid.startsWith('test-')) {
+      setUser(null);
+    } else {
+      signOut(auth);
+    }
+  };
 
   if (loading) {
     return (
@@ -245,10 +263,40 @@ export default function App() {
           </div>
 
           <div className="space-y-6">
-            <Button onClick={handleGoogleLogin} className="w-full py-4 text-lg flex items-center justify-center gap-3">
-              <img src="https://www.google.com/favicon.ico" className="w-5 h-5 brightness-0 invert" alt="Google" />
-              Entrar com Google
-            </Button>
+            <div className="space-y-3">
+              <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest text-center">Acesso Oficial</p>
+              <Button onClick={handleGoogleLogin} className="w-full py-4 text-lg flex items-center justify-center gap-3 bg-white text-black border-2 border-zinc-100 hover:bg-zinc-50 shadow-sm">
+                <img src="https://www.google.com/favicon.ico" className="w-5 h-5" alt="Google" />
+                Entrar com Google
+              </Button>
+            </div>
+
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-zinc-100"></div>
+              </div>
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-white px-4 text-zinc-300 font-bold tracking-widest">Ou</span>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest text-center">Modo de Teste (Demo)</p>
+              <div className="grid grid-cols-1 gap-2">
+                <Button variant="secondary" onClick={() => handleTestLogin('admin')} className="w-full justify-start gap-3 py-3">
+                  <ShieldCheck className="w-4 h-4 text-zinc-900" />
+                  Entrar como Administrador
+                </Button>
+                <Button variant="secondary" onClick={() => handleTestLogin('supervisor')} className="w-full justify-start gap-3 py-3">
+                  <Users className="w-4 h-4 text-blue-600" />
+                  Entrar como Supervisor
+                </Button>
+                <Button variant="secondary" onClick={() => handleTestLogin('operator')} className="w-full justify-start gap-3 py-3">
+                  <UserIcon className="w-4 h-4 text-emerald-600" />
+                  Entrar como Operador
+                </Button>
+              </div>
+            </div>
 
             {authError && (
               <p className="text-red-500 text-xs font-medium text-center bg-red-50 p-3 rounded-xl border border-red-100">
@@ -257,8 +305,8 @@ export default function App() {
             )}
           </div>
 
-          <p className="text-xs text-zinc-400 text-center">
-            Acesso restrito. Utilize sua conta corporativa Google.
+          <p className="text-[10px] text-zinc-300 text-center mt-8 uppercase tracking-tighter font-bold">
+            GIGA Plan Promaq v2.0 • 2026
           </p>
         </Card>
       </div>
