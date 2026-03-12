@@ -706,7 +706,6 @@ function NavItem({ active, onClick, icon, label }: any) {
 
 function Dashboard({ equipment, records, user, onDeleteRecord }: { equipment: Equipment[], records: MaintenanceRecord[], user: UserProfile, onDeleteRecord: (id: string) => void }) {
   const activeMaintenances = records.filter(r => r.status === 'in-progress');
-  const plannedMaintenances = records.filter(r => r.status === 'planned');
   
   // Simple overdue logic: if an equipment has a plan but no completed record in the last X hours
   const overdueEquip = equipment.filter(equip => {
@@ -718,10 +717,9 @@ function Dashboard({ equipment, records, user, onDeleteRecord }: { equipment: Eq
   
   return (
     <div className="space-y-8">
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <StatCard label="Total Equipamentos" value={equipment.length} icon={<HardHat className="text-blue-500" />} />
         <StatCard label="Em Manutenção" value={activeMaintenances.length} icon={<Clock className="text-orange-500" />} />
-        <StatCard label="Planejadas" value={plannedMaintenances.length} icon={<AlertCircle className="text-zinc-500" />} />
         <StatCard label="Concluídas (Mês)" value={records.filter(r => r.status === 'completed').length} icon={<CheckCircle2 className="text-emerald-500" />} />
       </div>
 
@@ -1596,7 +1594,7 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord }: { equi
               options={[
                 { value: 'all', label: 'Todos Status' },
                 { value: 'in-progress', label: 'Em Andamento' },
-                { value: 'completed', label: 'Completas' }
+                { value: 'completed', label: 'Concluídas' }
               ]}
             />
           </div>
@@ -2111,7 +2109,7 @@ function ReportsSection({ equipment, records, user, onDeleteRecord }: { equipmen
               options={[
                 { value: 'all', label: 'Todos Status' },
                 { value: 'in-progress', label: 'Em Andamento' },
-                { value: 'completed', label: 'Completas' }
+                { value: 'completed', label: 'Concluídas' }
               ]}
             />
           </div>
