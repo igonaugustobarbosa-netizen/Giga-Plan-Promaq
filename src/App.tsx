@@ -23,7 +23,8 @@ import {
   updateDoc,
   deleteDoc,
   orderBy,
-  Timestamp
+  Timestamp,
+  collectionGroup
 } from 'firebase/firestore';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -53,10 +54,11 @@ import {
   HardHat,
   Info,
   ShieldCheck,
-  Users
+  Users,
+  Bell
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { format, addHours, isAfter, parseISO } from 'date-fns';
+import { format, addHours, isAfter, parseISO, subDays, differenceInDays } from 'date-fns';
 import { UserProfile, Equipment, Part, MaintenancePlan, MaintenanceRecord, UserRole, MaintenanceStatus } from './types';
 
 // --- Utilities ---
@@ -198,6 +200,9 @@ export default function App() {
   const [modalType, setModalType] = useState<'equipment' | 'part' | 'plan' | 'record' | null>(null);
   const [selectedEquipment, setSelectedEquipment] = useState<Equipment | null>(null);
   const [selectedRecord, setSelectedRecord] = useState<MaintenanceRecord | null>(null);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [allPlans, setAllPlans] = useState<MaintenancePlan[]>([]);
+  const [notifications, setNotifications] = useState<{ id: string, title: string, description: string, type: 'new' | 'maintenance', date: string }[]>([]);
 
   // Auth Form States
   const [authError, setAuthError] = useState('');
@@ -272,6 +277,73 @@ export default function App() {
       unsubRecords();
     };
   }, [user]);
+
+  // Fetch all plans for notifications
+  useEffect(() => {
+    if (!user) return;
+    const unsub = onSnapshot(collectionGroup(db, 'plans'), (snapshot) => {
+      setAllPlans(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as MaintenancePlan)));
+    });
+    return () => unsub();
+  }, [user]);
+
+  // Calculate Notifications
+  useEffect(() => {
+    const newNotifications: any[] = [];
+    const now = new Date();
+
+    // 1. New Equipment (last 3 days)
+    equipment.forEach(equip => {
+      const createdDate = equip.createdAt ? parseISO(equip.createdAt) : null;
+      if (createdDate && differenceInDays(now, createdDate) <= 3) {
+        newNotifications.push({
+          id: `new-equip-${equip.id}`,
+          title: 'Novo Equipamento',
+          description: `${equip.name} foi cadastrado recentemente.`,
+          type: 'new',
+          date: equip.createdAt
+        });
+      }
+    });
+
+    // 2. Upcoming Maintenance
+    // We need the latest record for each plan to calculate remaining days
+    allPlans.forEach(plan => {
+      const equip = equipment.find(e => e.id === plan.equipmentId);
+      if (!equip) return;
+
+      const lastRecord = maintenanceRecords
+        .filter(r => r.planId === plan.id && r.status === 'completed')
+        .sort((a, b) => parseISO(b.startDate).getTime() - parseISO(a.startDate).getTime())[0];
+
+      const lastHourMeter = lastRecord?.hourMeter || 0;
+      const nextMaintenanceHour = lastHourMeter + plan.intervalHours;
+      const remainingHours = nextMaintenanceHour - (equip.currentHours || 0);
+      
+      if (equip.avgHoursPerDay && equip.avgHoursPerDay > 0) {
+        const days = Math.ceil(remainingHours / equip.avgHoursPerDay);
+        if (days >= 0 && days <= 7) {
+          newNotifications.push({
+            id: `maint-${plan.id}`,
+            title: 'Manutenção Próxima',
+            description: `${equip.name}: ${plan.description} em aprox. ${days} dias.`,
+            type: 'maintenance',
+            date: new Date().toISOString()
+          });
+        } else if (days < 0) {
+          newNotifications.push({
+            id: `maint-overdue-${plan.id}`,
+            title: 'Manutenção Atrasada',
+            description: `${equip.name}: ${plan.description} está atrasada!`,
+            type: 'maintenance',
+            date: new Date().toISOString()
+          });
+        }
+      }
+    });
+
+    setNotifications(newNotifications.sort((a, b) => parseISO(b.date).getTime() - parseISO(a.date).getTime()));
+  }, [equipment, allPlans, maintenanceRecords]);
 
   const handleGoogleLogin = async () => {
     setAuthError('');
@@ -527,6 +599,69 @@ export default function App() {
         <header className="h-16 bg-white border-b border-zinc-200 px-8 flex items-center justify-between sticky top-0 z-10">
           <h2 className="text-lg font-bold text-zinc-900 capitalize">{activeTab}</h2>
           <div className="flex items-center gap-4">
+            <div className="relative">
+              <button 
+                onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
+                className="p-2 text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 rounded-full transition-all relative"
+              >
+                <Bell size={20} />
+                {notifications.length > 0 && (
+                  <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full border-2 border-white"></span>
+                )}
+              </button>
+
+              <AnimatePresence>
+                {isNotificationsOpen && (
+                  <>
+                    <div 
+                      className="fixed inset-0 z-20" 
+                      onClick={() => setIsNotificationsOpen(false)}
+                    ></div>
+                    <motion.div 
+                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                      className="absolute right-0 mt-2 w-80 bg-white rounded-2xl shadow-2xl border border-zinc-100 z-30 overflow-hidden"
+                    >
+                      <div className="p-4 border-b border-zinc-100 flex items-center justify-between bg-zinc-50/50">
+                        <h3 className="text-xs font-bold text-zinc-900 uppercase tracking-widest">Notificações</h3>
+                        <span className="text-[10px] font-bold px-2 py-0.5 bg-zinc-200 text-zinc-600 rounded-full">
+                          {notifications.length}
+                        </span>
+                      </div>
+                      <div className="max-h-96 overflow-y-auto">
+                        {notifications.length > 0 ? (
+                          notifications.map(notif => (
+                            <div key={notif.id} className="p-4 border-b border-zinc-50 last:border-0 hover:bg-zinc-50 transition-colors cursor-default">
+                              <div className="flex gap-3">
+                                <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
+                                  notif.type === 'new' ? 'bg-blue-100 text-blue-600' : 'bg-orange-100 text-orange-600'
+                                }`}>
+                                  {notif.type === 'new' ? <Plus size={14} /> : <AlertCircle size={14} />}
+                                </div>
+                                <div>
+                                  <p className="text-sm font-bold text-zinc-900 leading-tight">{notif.title}</p>
+                                  <p className="text-xs text-zinc-500 mt-1 leading-relaxed">{notif.description}</p>
+                                  <p className="text-[10px] text-zinc-400 mt-2 font-medium">
+                                    {format(parseISO(notif.date), 'dd/MM/yyyy HH:mm')}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="p-8 text-center text-zinc-400">
+                            <Bell className="mx-auto mb-2 opacity-20" size={32} />
+                            <p className="text-xs">Nenhuma notificação no momento.</p>
+                          </div>
+                        )}
+                      </div>
+                    </motion.div>
+                  </>
+                )}
+              </AnimatePresence>
+            </div>
+
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={16} />
               <input 
