@@ -25,22 +25,28 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
     function isAdmin() {
       return isAuthenticated() && (
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-        (request.auth.token.email == "igonaugustobarbosa@gmail.com" && request.auth.token.email_verified == true)
+        request.auth.token.email == "igonaugustobarbosa@gmail.com" ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().role == 'admin')
       );
     }
 
     function isSupervisor() {
       return isAuthenticated() && (
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'supervisor' || isAdmin()
+        isAdmin() ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().role == 'supervisor')
       );
     }
 
     function isOperator() {
       return isAuthenticated() && (
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'operator' || isSupervisor()
+        isSupervisor() ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().role == 'operator')
       );
     }
 
@@ -49,14 +55,15 @@ service cloud.firestore {
     }
 
     function isValidUser(data) {
-      return data.keys().hasAll(['uid', 'email', 'role']) &&
+      return data.keys().hasAll(['email', 'role']) &&
              data.role in ['admin', 'supervisor', 'operator'] &&
-             data.email is string && data.uid is string;
+             data.email is string;
     }
 
     function isValidEquipment(data) {
-      return data.keys().hasAll(['name']) &&
-             data.name is string && data.name.size() > 0 && data.name.size() < 200;
+      return data.name is string && data.name.size() > 0 && data.name.size() < 500 &&
+             (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() < 2000000)) &&
+             (!('manualUrl' in data) || (data.manualUrl is string && data.manualUrl.size() < 2000000));
     }
 
     function isValidPart(data) {
@@ -71,38 +78,38 @@ service cloud.firestore {
 
     function isValidRecord(data) {
       return data.keys().hasAll(['equipmentId', 'status']) &&
-             data.status in ['planned', 'in-progress', 'completed'] &&
-             (!('totalPartsCost' in data) || data.totalPartsCost is number) &&
-             (!('totalLaborCost' in data) || data.totalLaborCost is number) &&
-             (!('usedParts' in data) || data.usedParts is list);
+             data.status in ['planned', 'in-progress', 'completed'];
     }
 
     // Rules
     match /users/{userId} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && isValidUser(request.resource.data) && (isOwner(userId) || isAdmin());
-      allow update: if isAuthenticated() && isValidUser(request.resource.data) && (isAdmin() || (isOwner(userId) && request.resource.data.role == resource.data.role));
+      allow create, update: if isAuthenticated() && (isOwner(userId) || request.auth.token.email == "igonaugustobarbosa@gmail.com");
       allow delete: if isAdmin();
     }
 
     match /equipment/{equipmentId} {
-      allow read: if isOperator();
+      allow read: if isAuthenticated();
+      // Permissão total para o administrador pelo e-mail
+      allow write: if isAuthenticated() && request.auth.token.email == "igonaugustobarbosa@gmail.com";
+      // Permissões para outros usuários baseadas em cargo
       allow create, update: if isSupervisor() && isValidEquipment(request.resource.data);
       allow delete: if isAdmin();
 
       match /parts/{partId} {
-        allow read: if isOperator();
-        allow write: if isSupervisor() && isValidPart(request.resource.data);
+        allow read: if isAuthenticated();
+        allow write: if isAuthenticated() && (request.auth.token.email == "igonaugustobarbosa@gmail.com" || isSupervisor());
       }
 
       match /plans/{planId} {
-        allow read: if isOperator();
-        allow write: if isSupervisor() && isValidPlan(request.resource.data);
+        allow read: if isAuthenticated();
+        allow write: if isAuthenticated() && (request.auth.token.email == "igonaugustobarbosa@gmail.com" || isSupervisor());
       }
     }
 
     match /maintenance_records/{recordId} {
-      allow read: if isOperator();
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && request.auth.token.email == "igonaugustobarbosa@gmail.com";
       allow create, update: if isOperator() && isValidRecord(request.resource.data);
       allow delete: if isAdmin();
     }

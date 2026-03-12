@@ -57,6 +57,47 @@ import { motion, AnimatePresence } from 'motion/react';
 import { format, addHours, isAfter, parseISO } from 'date-fns';
 import { UserProfile, Equipment, Part, MaintenancePlan, MaintenanceRecord, UserRole, MaintenanceStatus } from './types';
 
+// --- Utilities ---
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string;
+    email?: string;
+    emailVerified?: boolean;
+    isAnonymous?: boolean;
+    tenantId?: string | null;
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  return errInfo.error;
+}
+
 // --- Components ---
 
 const Button = ({ children, onClick, variant = 'primary', className = '', disabled = false, type = 'button' }: any) => {
@@ -166,15 +207,44 @@ export default function App() {
         if (userDoc.exists()) {
           setUser(userDoc.data() as UserProfile);
         } else {
-          // New user default to operator or admin if it's the first user
-          const newUser: UserProfile = {
-            uid: firebaseUser.uid,
-            email: firebaseUser.email || '',
-            name: firebaseUser.displayName || 'Usuário',
-            role: firebaseUser.email === 'igonaugustobarbosa@gmail.com' ? 'admin' : 'operator'
-          };
-          await setDoc(doc(db, 'users', firebaseUser.uid), newUser);
-          setUser(newUser);
+          // Check if there's a pre-registration by email
+          const preRegDoc = await getDoc(doc(db, 'users', firebaseUser.email || ''));
+          
+          if (preRegDoc.exists()) {
+            const preRegData = preRegDoc.data();
+            const newUser: UserProfile = {
+              uid: firebaseUser.uid,
+              email: firebaseUser.email || '',
+              name: firebaseUser.displayName || preRegData.name || 'Usuário',
+              role: preRegData.role || 'operator'
+            };
+            try {
+              await setDoc(doc(db, 'users', firebaseUser.uid), newUser);
+              // Delete the pre-registration document
+              await deleteDoc(doc(db, 'users', firebaseUser.email || ''));
+              setUser(newUser);
+            } catch (err) {
+              console.error('Error creating user document from pre-reg:', err);
+              handleFirestoreError(err, OperationType.CREATE, `users/${firebaseUser.uid}`);
+              setAuthError('Erro ao configurar perfil de usuário. Verifique sua conexão.');
+            }
+          } else {
+            // New user default to operator or admin if it's the first user
+            const newUser: UserProfile = {
+              uid: firebaseUser.uid,
+              email: firebaseUser.email || '',
+              name: firebaseUser.displayName || 'Usuário',
+              role: firebaseUser.email === 'igonaugustobarbosa@gmail.com' ? 'admin' : 'operator'
+            };
+            try {
+              await setDoc(doc(db, 'users', firebaseUser.uid), newUser);
+              setUser(newUser);
+            } catch (err) {
+              console.error('Error creating user document:', err);
+              handleFirestoreError(err, OperationType.CREATE, `users/${firebaseUser.uid}`);
+              setAuthError('Erro ao configurar perfil de usuário. Verifique sua conexão.');
+            }
+          }
         }
       } else {
         setUser(null);
@@ -191,12 +261,12 @@ export default function App() {
     const qEquip = query(collection(db, 'equipment'), orderBy('createdAt', 'desc'));
     const unsubEquip = onSnapshot(qEquip, (snapshot) => {
       setEquipment(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Equipment)));
-    });
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'equipment'));
 
     const qRecords = query(collection(db, 'maintenance_records'), orderBy('startDate', 'desc'));
     const unsubRecords = onSnapshot(qRecords, (snapshot) => {
       setMaintenanceRecords(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as MaintenanceRecord)));
-    });
+    }, (error) => handleFirestoreError(error, OperationType.LIST, 'maintenance_records'));
 
     return () => {
       unsubEquip();
@@ -525,6 +595,8 @@ function EquipmentSection({ equipment, user }: { equipment: Equipment[], user: U
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<Equipment | null>(null);
   const [viewingItem, setViewingItem] = useState<Equipment | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
   
   const [photoSource, setPhotoSource] = useState<'url' | 'file'>('url');
   const [manualSource, setManualSource] = useState<'url' | 'file'>('url');
@@ -562,6 +634,8 @@ function EquipmentSection({ equipment, user }: { equipment: Equipment[], user: U
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    setSaving(true);
+    setSaveError('');
     const formData = new FormData(e.currentTarget);
     const data = {
       name: formData.get('name') as string,
@@ -583,8 +657,11 @@ function EquipmentSection({ equipment, user }: { equipment: Equipment[], user: U
       }
       setIsModalOpen(false);
       setEditingItem(null);
-    } catch (error) {
-      console.error('Error saving equipment:', error);
+    } catch (error: any) {
+      const msg = handleFirestoreError(error, editingItem ? OperationType.UPDATE : OperationType.CREATE, 'equipment');
+      setSaveError(msg);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -765,9 +842,18 @@ function EquipmentSection({ equipment, user }: { equipment: Equipment[], user: U
               className="w-full px-3 py-2 bg-zinc-50 border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-black/5 focus:border-black transition-all"
             />
           </div>
+
+          {saveError && (
+            <div className="p-3 bg-red-50 border border-red-100 rounded-xl text-red-600 text-xs font-medium">
+              Erro ao salvar: {saveError}
+            </div>
+          )}
+
           <div className="flex justify-end gap-3 pt-4">
-            <Button variant="outline" onClick={() => setIsModalOpen(false)}>Cancelar</Button>
-            <Button type="submit">Salvar Equipamento</Button>
+            <Button variant="outline" onClick={() => setIsModalOpen(false)} disabled={saving}>Cancelar</Button>
+            <Button type="submit" disabled={saving}>
+              {saving ? 'Salvando...' : 'Salvar Equipamento'}
+            </Button>
           </div>
         </form>
       </Modal>
@@ -1881,6 +1967,7 @@ function UsersSection({ user }: { user: UserProfile }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [newUser, setNewUser] = useState({ name: '', email: '', role: 'operator' as UserRole });
 
   useEffect(() => {
     const q = query(collection(db, 'users'));
@@ -1907,6 +1994,40 @@ function UsersSection({ user }: { user: UserProfile }) {
     }
   };
 
+  const handleRegisterUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+
+    try {
+      if (!newUser.email || !newUser.name) {
+        throw new Error('Preencha todos os campos.');
+      }
+
+      // Check if user already exists
+      const existingUser = users.find(u => u.email.toLowerCase() === newUser.email.toLowerCase());
+      if (existingUser) {
+        throw new Error('Este e-mail já está cadastrado.');
+      }
+
+      // Pre-register user using email as document ID
+      await setDoc(doc(db, 'users', newUser.email.toLowerCase()), {
+        email: newUser.email.toLowerCase(),
+        name: newUser.name,
+        role: newUser.role,
+        isPending: true,
+        uid: newUser.email.toLowerCase() // Temporary UID
+      });
+
+      setIsModalOpen(false);
+      setNewUser({ name: '', email: '', role: 'operator' });
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -1914,7 +2035,66 @@ function UsersSection({ user }: { user: UserProfile }) {
           <h3 className="text-2xl font-bold text-zinc-900">Gestão de Usuários</h3>
           <p className="text-zinc-500">Controle quem tem acesso ao sistema e seus níveis de permissão.</p>
         </div>
+        {user.role === 'admin' && (
+          <Button onClick={() => setIsModalOpen(true)}>
+            <Plus size={20} />
+            Cadastrar Usuário
+          </Button>
+        )}
       </div>
+
+      <Modal 
+        isOpen={isModalOpen} 
+        onClose={() => setIsModalOpen(false)} 
+        title="Cadastrar Novo Usuário"
+      >
+        <form onSubmit={handleRegisterUser} className="space-y-4">
+          <Input 
+            label="Nome Completo"
+            placeholder="Ex: João Silva"
+            value={newUser.name}
+            onChange={(e: any) => setNewUser({ ...newUser, name: e.target.value })}
+            required
+          />
+          <Input 
+            label="E-mail Google"
+            type="email"
+            placeholder="usuario@gmail.com"
+            value={newUser.email}
+            onChange={(e: any) => setNewUser({ ...newUser, email: e.target.value })}
+            required
+          />
+          <Select 
+            label="Nível de Acesso"
+            value={newUser.role}
+            onChange={(e: any) => setNewUser({ ...newUser, role: e.target.value as UserRole })}
+            options={[
+              { value: 'admin', label: 'Administrador' },
+              { value: 'supervisor', label: 'Supervisor' },
+              { value: 'operator', label: 'Operador' }
+            ]}
+          />
+          
+          {error && (
+            <div className="p-3 bg-red-50 border border-red-100 rounded-xl text-red-600 text-xs font-medium">
+              {error}
+            </div>
+          )}
+
+          <div className="pt-4 flex gap-3">
+            <Button variant="outline" className="flex-1" onClick={() => setIsModalOpen(false)}>
+              Cancelar
+            </Button>
+            <Button type="submit" className="flex-1" disabled={loading}>
+              {loading ? 'Cadastrando...' : 'Cadastrar'}
+            </Button>
+          </div>
+          
+          <p className="text-[10px] text-zinc-400 text-center italic">
+            O usuário será ativado automaticamente ao realizar o primeiro login com o e-mail informado.
+          </p>
+        </form>
+      </Modal>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {users.map(u => (
