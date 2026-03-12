@@ -740,9 +740,17 @@ function Dashboard({ equipment, records, user, onDeleteRecord }: { equipment: Eq
                   <p className="text-xs text-orange-600 font-medium">{record.planDescription}</p>
                 </div>
                 <div className="text-right flex items-center gap-3">
-                  <div>
-                    <p className="text-xs font-bold text-zinc-400 uppercase">Início</p>
-                    <p className="text-sm font-bold">{format(parseISO(record.startDate), 'HH:mm')}</p>
+                  <div className="flex gap-4">
+                    <div className="text-right">
+                      <p className="text-[10px] font-bold text-zinc-400 uppercase">Programado</p>
+                      <p className="text-sm font-bold text-zinc-600">
+                        {record.scheduledStartDate ? format(parseISO(record.scheduledStartDate + 'T00:00:00'), 'dd/MM/yyyy') : '--/--/----'}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[10px] font-bold text-zinc-400 uppercase">Início</p>
+                      <p className="text-sm font-bold">{format(parseISO(record.startDate), 'HH:mm')}</p>
+                    </div>
                   </div>
                   {user.role !== 'operator' && (
                     <button 
