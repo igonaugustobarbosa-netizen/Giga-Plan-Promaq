@@ -2,7 +2,8 @@ export type UserRole = 'admin' | 'supervisor' | 'operator';
 
 export interface UserProfile {
   uid: string;
-  email: string;
+  username: string;
+  password?: string;
   name: string;
   role: UserRole;
 }

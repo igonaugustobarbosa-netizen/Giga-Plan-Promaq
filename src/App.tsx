@@ -13,6 +13,7 @@ import {
 import { 
   doc, 
   getDoc, 
+  getDocs,
   setDoc, 
   onSnapshot, 
   collection, 
@@ -44,6 +45,7 @@ import {
   StopCircle,
   Download,
   Eye,
+  EyeOff,
   Trash2,
   Edit3,
   User as UserIcon,
@@ -186,6 +188,7 @@ export default function App() {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [loginForm, setLoginForm] = useState({ username: '', password: '' });
   
   // Data States
   const [equipment, setEquipment] = useState<Equipment[]>([]);
@@ -201,35 +204,39 @@ export default function App() {
 
   // Auth Effect
   useEffect(() => {
+    // Tenta recuperar sessão salva localmente
+    const savedUser = localStorage.getItem('giga_plan_user');
+    if (savedUser) {
+      try {
+        setUser(JSON.parse(savedUser));
+      } catch (e) {
+        localStorage.removeItem('giga_plan_user');
+      }
+    }
+
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
         if (userDoc.exists()) {
-          setUser(userDoc.data() as UserProfile);
+          const userData = userDoc.data() as UserProfile;
+          setUser(userData);
+          localStorage.setItem('giga_plan_user', JSON.stringify(userData));
         } else {
           const newUser: UserProfile = {
             uid: firebaseUser.uid,
-            email: firebaseUser.email || '',
+            username: firebaseUser.email || '',
             name: firebaseUser.displayName || 'Usuário',
             role: firebaseUser.email === 'igonaugustobarbosa@gmail.com' ? 'admin' : 'operator'
           };
           try {
             await setDoc(doc(db, 'users', firebaseUser.uid), newUser);
             setUser(newUser);
+            localStorage.setItem('giga_plan_user', JSON.stringify(newUser));
           } catch (err) {
             console.error('Error creating user document:', err);
-            setUser(newUser); // Set anyway for UI
+            setUser(newUser);
           }
         }
-      } else {
-        // Se não houver login do Google, define um usuário Admin padrão para acesso direto
-        const defaultAdmin: UserProfile = {
-          uid: 'public-admin',
-          email: 'admin@promaq.com',
-          name: 'Administrador GIGA',
-          role: 'admin'
-        };
-        setUser(defaultAdmin);
       }
       setLoading(false);
     });
@@ -240,7 +247,7 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
 
-    console.log('Fetching data for user:', user.email, 'Role:', user.role);
+    console.log('Fetching data for user:', user.username, 'Role:', user.role);
 
     const qEquip = query(collection(db, 'equipment'));
     const unsubEquip = onSnapshot(qEquip, (snapshot) => {
@@ -283,18 +290,62 @@ export default function App() {
   const handleTestLogin = (role: UserRole) => {
     const mockUser: UserProfile = {
       uid: `test-${role}`,
-      email: `test-${role}@example.com`,
+      username: `test-${role}`,
       name: `Usuário Teste (${role === 'admin' ? 'Admin' : role === 'supervisor' ? 'Supervisor' : 'Operador'})`,
       role: role
     };
     setUser(mockUser);
   };
 
+  const [showPassword, setShowPassword] = useState(false);
+
+  const handleCustomLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError('');
+    
+    const username = loginForm.username.trim().toLowerCase();
+    const password = loginForm.password.trim();
+    
+    if (username === 'administrador' && password === '123456') {
+      const adminUser: UserProfile = {
+        uid: 'local-admin',
+        username: 'administrador',
+        name: 'Administrador GIGA',
+        role: 'admin'
+      };
+      setUser(adminUser);
+      localStorage.setItem('giga_plan_user', JSON.stringify(adminUser));
+      return;
+    }
+
+    try {
+      const q = query(collection(db, 'users'), where('username', '==', username));
+      const snapshot = await getDocs(q);
+      
+      if (snapshot.empty) {
+        throw new Error('Usuário não encontrado.');
+      }
+
+      const userData = snapshot.docs[0].data() as UserProfile;
+      
+      if (userData.password !== password) {
+        throw new Error('Senha incorreta.');
+      }
+
+      setUser(userData);
+      localStorage.setItem('giga_plan_user', JSON.stringify(userData));
+    } catch (err: any) {
+      setAuthError(err.message || 'Erro ao realizar login.');
+    }
+  };
+
   const handleLogout = () => {
-    if (user?.uid.startsWith('test-')) {
+    localStorage.removeItem('giga_plan_user');
+    if (user?.uid.startsWith('local-') || user?.uid.startsWith('test-')) {
       setUser(null);
     } else {
       signOut(auth);
+      setUser(null);
     }
   };
 
@@ -305,6 +356,86 @@ export default function App() {
           <div className="w-12 h-12 border-4 border-zinc-200 border-t-black rounded-full animate-spin"></div>
           <p className="text-zinc-500 font-medium animate-pulse">GIGA Plan Promaq carregando...</p>
         </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-zinc-50 flex items-center justify-center p-4">
+        <Card className="max-w-md w-full p-8 space-y-8">
+          <div className="text-center space-y-6">
+            <div className="w-20 h-20 bg-black rounded-2xl flex items-center justify-center mx-auto shadow-xl rotate-3">
+              <Wrench className="w-10 h-10 text-white" />
+            </div>
+            <div className="space-y-2">
+              <h1 className="text-3xl font-bold tracking-tight">GIGA Plan Promaq</h1>
+              <p className="text-zinc-500 font-medium">Desenvolvedor: 43 996118806</p>
+            </div>
+          </div>
+
+          <form onSubmit={handleCustomLogin} className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Usuário</label>
+              <Input 
+                value={loginForm.username}
+                onChange={(e) => setLoginForm({...loginForm, username: e.target.value})}
+                placeholder="Digite o usuário" 
+                className="py-6"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Senha</label>
+              <div className="relative">
+                <Input 
+                  type={showPassword ? "text" : "password"}
+                  value={loginForm.password}
+                  onChange={(e) => setLoginForm({...loginForm, password: e.target.value})}
+                  placeholder="Digite a senha" 
+                  className="py-6 pr-12"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600"
+                >
+                  {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                </button>
+              </div>
+            </div>
+            
+            {authError && (
+              <p className="text-red-500 text-xs font-medium text-center bg-red-50 p-3 rounded-xl border border-red-100">
+                {authError}
+              </p>
+            )}
+
+            <Button type="submit" className="w-full py-6 text-lg bg-black text-white hover:bg-zinc-800 shadow-lg">
+              Entrar no Sistema
+            </Button>
+            <p className="text-[10px] text-zinc-400 text-center italic">
+              Dica: Usuário "administrador" e senha "123456"
+            </p>
+          </form>
+
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-zinc-100"></div>
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-white px-4 text-zinc-300 font-bold tracking-widest">Ou</span>
+            </div>
+          </div>
+
+          <Button onClick={handleGoogleLogin} variant="outline" className="w-full py-6 flex items-center justify-center gap-3 border-zinc-200 hover:bg-zinc-50">
+            <img src="https://www.google.com/favicon.ico" className="w-5 h-5" alt="Google" />
+            Entrar com Google
+          </Button>
+
+          <p className="text-[10px] text-zinc-300 text-center mt-8 uppercase tracking-tighter font-bold">
+            GIGA Plan Promaq v2.0 • 2026
+          </p>
+        </Card>
       </div>
     );
   }
@@ -1894,13 +2025,23 @@ function UsersSection({ user }: { user: UserProfile }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [newUser, setNewUser] = useState({ name: '', email: '', role: 'operator' as UserRole });
+  const [newUser, setNewUser] = useState({ name: '', username: '', password: '', role: 'operator' as UserRole });
 
   useEffect(() => {
+    console.log('UsersSection mounted, setting up snapshot listener');
     const q = query(collection(db, 'users'));
-    return onSnapshot(q, (snapshot) => {
-      setUsers(snapshot.docs.map(d => d.data() as UserProfile));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const usersData = snapshot.docs.map(d => d.data() as UserProfile);
+      console.log('Users snapshot received:', usersData.length, 'users');
+      setUsers(usersData);
+    }, (err) => {
+      console.error('Error in users snapshot:', err);
+      setError('Erro ao carregar lista de usuários: ' + err.message);
     });
+    return () => {
+      console.log('UsersSection unmounting, cleaning up listener');
+      unsubscribe();
+    };
   }, []);
 
   const handleRoleChange = async (uid: string, newRole: UserRole) => {
@@ -1916,7 +2057,7 @@ function UsersSection({ user }: { user: UserProfile }) {
       alert('Você não pode excluir seu próprio usuário.');
       return;
     }
-    if (confirm('Tem certeza que deseja excluir este usuário? O acesso será revogado, mas o registro no Firebase Auth permanecerá (exclusão manual necessária no console para remoção total).')) {
+    if (confirm('Tem certeza que deseja excluir este usuário?')) {
       await deleteDoc(doc(db, 'users', uid));
     }
   };
@@ -1927,29 +2068,38 @@ function UsersSection({ user }: { user: UserProfile }) {
     setError('');
 
     try {
-      if (!newUser.email || !newUser.name) {
+      const username = newUser.username.toLowerCase().trim();
+      console.log('Attempting to register user:', username);
+      
+      if (!username || !newUser.password || !newUser.name) {
         throw new Error('Preencha todos os campos.');
       }
 
       // Check if user already exists
-      const existingUser = users.find(u => u.email.toLowerCase() === newUser.email.toLowerCase());
+      const existingUser = users.find(u => (u.username || '').toLowerCase() === username);
       if (existingUser) {
-        throw new Error('Este e-mail já está cadastrado.');
+        throw new Error('Este nome de usuário já está cadastrado.');
       }
 
-      // Pre-register user using email as document ID
-      await setDoc(doc(db, 'users', newUser.email.toLowerCase()), {
-        email: newUser.email.toLowerCase(),
-        name: newUser.name,
-        role: newUser.role,
-        isPending: true,
-        uid: newUser.email.toLowerCase() // Temporary UID
-      });
+      const userData = {
+        uid: username, // Use username as UID for simplicity and uniqueness
+        username: username,
+        password: newUser.password,
+        name: newUser.name.trim(),
+        role: newUser.role
+      };
 
+      console.log('Saving user to Firestore with ID:', username, userData);
+      
+      await setDoc(doc(db, 'users', username), userData);
+
+      console.log('User saved successfully');
       setIsModalOpen(false);
-      setNewUser({ name: '', email: '', role: 'operator' });
+      setNewUser({ name: '', username: '', password: '', role: 'operator' });
     } catch (err: any) {
-      setError(err.message);
+      console.error('Error registering user:', err);
+      const errorMessage = handleFirestoreError(err, OperationType.WRITE, 'users');
+      setError(errorMessage || err.message || 'Erro desconhecido ao cadastrar usuário.');
     } finally {
       setLoading(false);
     }
@@ -1984,11 +2134,18 @@ function UsersSection({ user }: { user: UserProfile }) {
             required
           />
           <Input 
-            label="E-mail Google"
-            type="email"
-            placeholder="usuario@gmail.com"
-            value={newUser.email}
-            onChange={(e: any) => setNewUser({ ...newUser, email: e.target.value })}
+            label="Nome de Usuário"
+            placeholder="usuario.exemplo"
+            value={newUser.username}
+            onChange={(e: any) => setNewUser({ ...newUser, username: e.target.value })}
+            required
+          />
+          <Input 
+            label="Senha"
+            type="password"
+            placeholder="******"
+            value={newUser.password}
+            onChange={(e: any) => setNewUser({ ...newUser, password: e.target.value })}
             required
           />
           <Select 
@@ -2016,10 +2173,6 @@ function UsersSection({ user }: { user: UserProfile }) {
               {loading ? 'Cadastrando...' : 'Cadastrar'}
             </Button>
           </div>
-          
-          <p className="text-[10px] text-zinc-400 text-center italic">
-            O usuário será ativado automaticamente ao realizar o primeiro login com o e-mail informado.
-          </p>
         </form>
       </Modal>
 
@@ -2036,7 +2189,7 @@ function UsersSection({ user }: { user: UserProfile }) {
               </div>
               <div className="flex-1 min-w-0">
                 <p className="font-bold text-zinc-900 truncate">{u.name}</p>
-                <p className="text-xs text-zinc-500 truncate">{u.email}</p>
+                <p className="text-xs text-zinc-500 truncate">{u.username ? `@${u.username}` : 'Sem usuário'}</p>
               </div>
               {user.role === 'admin' && u.uid !== user.uid && (
                 <button 

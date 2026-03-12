@@ -5,7 +5,7 @@ service cloud.firestore {
     // Assumed Data Model
     // ===============================================================
     // Collection: users
-    // Fields: uid, email, name, role (admin, supervisor, operator)
+    // Fields: uid, username, password, name, role (admin, supervisor, operator)
     //
     // Collection: equipment
     // Fields: name, model, serialNumber, technicalInfo, photoUrl, manualUrl, createdAt
@@ -55,9 +55,10 @@ service cloud.firestore {
     }
 
     function isValidUser(data) {
-      return data.keys().hasAll(['email', 'role']) &&
+      return data.keys().hasAll(['username', 'role']) &&
              data.role in ['admin', 'supervisor', 'operator'] &&
-             data.email is string;
+             data.username is string &&
+             (!('password' in data) || data.password is string);
     }
 
     function isValidEquipment(data) {
