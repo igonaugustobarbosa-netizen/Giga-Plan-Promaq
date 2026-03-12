@@ -6,12 +6,7 @@ import {
 import firebaseConfig from '../firebase-applet-config.json';
 import { 
   onAuthStateChanged, 
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
   signOut,
-  getAuth,
-  signOut as secondarySignOut,
-  sendPasswordResetEmail,
   GoogleAuthProvider,
   signInWithPopup
 } from 'firebase/auth';
@@ -159,12 +154,7 @@ export default function App() {
   const [selectedRecord, setSelectedRecord] = useState<MaintenanceRecord | null>(null);
 
   // Auth Form States
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [isRegistering, setIsRegistering] = useState(false);
-  const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [authError, setAuthError] = useState('');
-  const [authSuccess, setAuthSuccess] = useState('');
 
   // Auth Effect
   useEffect(() => {
@@ -212,31 +202,6 @@ export default function App() {
     };
   }, [user]);
 
-  const handleAuth = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAuthError('');
-    setAuthSuccess('');
-    try {
-      if (isForgotPassword) {
-        await sendPasswordResetEmail(auth, email);
-        setAuthSuccess('E-mail de redefinição enviado! Verifique sua caixa de entrada.');
-        setIsForgotPassword(false);
-      } else if (isRegistering) {
-        await createUserWithEmailAndPassword(auth, email, password);
-      } else {
-        await signInWithEmailAndPassword(auth, email, password);
-      }
-    } catch (error: any) {
-      console.error('Auth error:', error);
-      let message = error.message;
-      if (error.code === 'auth/user-not-found') message = 'Usuário não encontrado.';
-      if (error.code === 'auth/wrong-password') message = 'Senha incorreta.';
-      if (error.code === 'auth/invalid-email') message = 'E-mail inválido.';
-      if (error.code === 'auth/popup-closed-by-user') message = 'Login cancelado.';
-      setAuthError(message);
-    }
-  };
-
   const handleGoogleLogin = async () => {
     setAuthError('');
     try {
@@ -244,7 +209,10 @@ export default function App() {
       await signInWithPopup(auth, provider);
     } catch (error: any) {
       console.error('Google Auth error:', error);
-      setAuthError(error.message);
+      let message = error.message;
+      if (error.code === 'auth/popup-closed-by-user') message = 'Login cancelado pelo usuário.';
+      if (error.code === 'auth/cancelled-popup-request') message = 'Solicitação de login cancelada.';
+      setAuthError(message);
     }
   };
 
@@ -276,91 +244,21 @@ export default function App() {
             </div>
           </div>
 
-          <form onSubmit={handleAuth} className="space-y-4">
-            <Input 
-              label="E-mail" 
-              type="email" 
-              value={email} 
-              onChange={(e: any) => setEmail(e.target.value)} 
-              required 
-            />
-            {!isForgotPassword && (
-              <Input 
-                label="Senha" 
-                type="password" 
-                value={password} 
-                onChange={(e: any) => setPassword(e.target.value)} 
-                required 
-              />
-            )}
-            
+          <div className="space-y-6">
+            <Button onClick={handleGoogleLogin} className="w-full py-4 text-lg flex items-center justify-center gap-3">
+              <img src="https://www.google.com/favicon.ico" className="w-5 h-5 brightness-0 invert" alt="Google" />
+              Entrar com Google
+            </Button>
+
             {authError && (
-              <p className="text-red-500 text-xs font-medium text-center bg-red-50 p-2 rounded-lg border border-red-100">
+              <p className="text-red-500 text-xs font-medium text-center bg-red-50 p-3 rounded-xl border border-red-100">
                 {authError}
               </p>
             )}
-
-            {authSuccess && (
-              <p className="text-emerald-500 text-xs font-medium text-center bg-emerald-50 p-2 rounded-lg border border-emerald-100">
-                {authSuccess}
-              </p>
-            )}
-
-            <Button type="submit" className="w-full py-4 text-lg">
-              {isForgotPassword ? 'Enviar E-mail de Recuperação' : isRegistering ? 'Criar Conta' : 'Entrar'}
-            </Button>
-          </form>
-
-          {!isForgotPassword && !isRegistering && (
-            <div className="space-y-4">
-              <div className="relative">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-zinc-200"></div>
-                </div>
-                <div className="relative flex justify-center text-xs uppercase">
-                  <span className="bg-white px-2 text-zinc-400 font-bold">Ou continue com</span>
-                </div>
-              </div>
-
-              <Button variant="secondary" onClick={handleGoogleLogin} className="w-full py-3">
-                <img src="https://www.google.com/favicon.ico" className="w-4 h-4" alt="Google" />
-                Entrar com Google
-              </Button>
-            </div>
-          )}
-
-          <div className="flex flex-col gap-3 text-center">
-            {!isForgotPassword && (
-              <button 
-                onClick={() => {
-                  setIsForgotPassword(true);
-                  setAuthError('');
-                  setAuthSuccess('');
-                }}
-                className="text-xs text-zinc-400 hover:text-zinc-600 font-medium transition-colors"
-              >
-                Esqueceu sua senha?
-              </button>
-            )}
-            
-            <button 
-              onClick={() => {
-                if (isForgotPassword) {
-                  setIsForgotPassword(false);
-                } else {
-                  setIsRegistering(!isRegistering);
-                }
-                setAuthError('');
-                setAuthSuccess('');
-              }}
-              className="text-sm text-zinc-500 hover:text-black font-medium transition-colors"
-            >
-              {isForgotPassword ? 'Voltar para o Login' : isRegistering ? 'Já tem uma conta? Entre aqui' : 'Não tem uma conta? Cadastre-se'}
-            </button>
           </div>
 
           <p className="text-xs text-zinc-400 text-center">
-            Acesso restrito a pessoal autorizado.
+            Acesso restrito. Utilize sua conta corporativa Google.
           </p>
         </Card>
       </div>
@@ -1951,42 +1849,6 @@ function UsersSection({ user }: { user: UserProfile }) {
     await updateDoc(doc(db, 'users', uid), { role: newRole });
   };
 
-  const handleCreateUser = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    setLoading(true);
-    setError('');
-    
-    const formData = new FormData(e.currentTarget);
-    const email = formData.get('email') as string;
-    const password = formData.get('password') as string;
-    const name = formData.get('name') as string;
-    const role = formData.get('role') as UserRole;
-
-    try {
-      // Create a secondary app to create user without logging out current admin
-      const secondaryApp = initializeApp(firebaseConfig, 'Secondary');
-      const secondaryAuth = getAuth(secondaryApp);
-      
-      const userCredential = await createUserWithEmailAndPassword(secondaryAuth, email, password);
-      const uid = userCredential.user.uid;
-      
-      await setDoc(doc(db, 'users', uid), {
-        uid,
-        email,
-        name,
-        role
-      });
-
-      await secondarySignOut(secondaryAuth);
-      setIsModalOpen(false);
-    } catch (err: any) {
-      console.error('Error creating user:', err);
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleDeleteUser = async (uid: string) => {
     if (uid === user.uid) {
       alert('Você não pode excluir seu próprio usuário.');
@@ -2004,11 +1866,6 @@ function UsersSection({ user }: { user: UserProfile }) {
           <h3 className="text-2xl font-bold text-zinc-900">Gestão de Usuários</h3>
           <p className="text-zinc-500">Controle quem tem acesso ao sistema e seus níveis de permissão.</p>
         </div>
-        {user.role === 'admin' && (
-          <Button onClick={() => setIsModalOpen(true)}>
-            <Plus size={20} /> Novo Usuário
-          </Button>
-        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -2052,40 +1909,6 @@ function UsersSection({ user }: { user: UserProfile }) {
           </Card>
         ))}
       </div>
-
-      <Modal 
-        isOpen={isModalOpen} 
-        onClose={() => setIsModalOpen(false)} 
-        title="Criar Novo Usuário"
-      >
-        <form onSubmit={handleCreateUser} className="space-y-4">
-          <Input label="Nome Completo" name="name" required />
-          <Input label="E-mail" name="email" type="email" required />
-          <Input label="Senha" name="password" type="password" required minLength={6} />
-          <Select 
-            label="Nível de Acesso" 
-            name="role" 
-            options={[
-              { value: 'operator', label: 'Operador (Apenas visualização e registros)' },
-              { value: 'supervisor', label: 'Supervisor (Gestão de planos e peças)' },
-              { value: 'admin', label: 'Administrador (Acesso total)' }
-            ]} 
-          />
-          
-          {error && (
-            <p className="text-red-500 text-xs font-medium text-center bg-red-50 p-2 rounded-lg border border-red-100">
-              {error}
-            </p>
-          )}
-
-          <div className="flex justify-end gap-3 pt-4">
-            <Button variant="outline" onClick={() => setIsModalOpen(false)} disabled={loading}>Cancelar</Button>
-            <Button type="submit" disabled={loading}>
-              {loading ? 'Criando...' : 'Criar Usuário'}
-            </Button>
-          </div>
-        </form>
-      </Modal>
     </div>
   );
 }
