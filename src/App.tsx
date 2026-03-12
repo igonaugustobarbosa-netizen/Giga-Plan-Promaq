@@ -2200,9 +2200,11 @@ function ReportsSection({ equipment, records, user, onDeleteRecord }: { equipmen
 function UsersSection({ user }: { user: UserProfile }) {
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [newUser, setNewUser] = useState({ name: '', username: '', password: '', role: 'operator' as UserRole });
+  const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
 
   useEffect(() => {
     console.log('UsersSection mounted, setting up snapshot listener');
@@ -2282,6 +2284,28 @@ function UsersSection({ user }: { user: UserProfile }) {
     }
   };
 
+  const handleUpdateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingUser) return;
+    setLoading(true);
+    setError('');
+
+    try {
+      await updateDoc(doc(db, 'users', editingUser.uid), {
+        name: editingUser.name,
+        role: editingUser.role,
+        password: editingUser.password
+      });
+      setIsEditModalOpen(false);
+      setEditingUser(null);
+    } catch (err: any) {
+      console.error('Error updating user:', err);
+      setError('Erro ao atualizar usuário: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -2353,6 +2377,60 @@ function UsersSection({ user }: { user: UserProfile }) {
         </form>
       </Modal>
 
+      <Modal 
+        isOpen={isEditModalOpen} 
+        onClose={() => setIsEditModalOpen(false)} 
+        title="Editar Usuário"
+      >
+        {editingUser && (
+          <form onSubmit={handleUpdateUser} className="space-y-4">
+            <Input 
+              label="Nome Completo"
+              value={editingUser.name}
+              onChange={(e: any) => setEditingUser({ ...editingUser, name: e.target.value })}
+              required
+            />
+            <Input 
+              label="Nome de Usuário"
+              value={editingUser.username}
+              disabled
+            />
+            <Input 
+              label="Senha"
+              type="password"
+              value={editingUser.password || ''}
+              onChange={(e: any) => setEditingUser({ ...editingUser, password: e.target.value })}
+              required
+            />
+            <Select 
+              label="Nível de Acesso"
+              value={editingUser.role}
+              onChange={(e: any) => setEditingUser({ ...editingUser, role: e.target.value as UserRole })}
+              options={[
+                { value: 'admin', label: 'Administrador' },
+                { value: 'supervisor', label: 'Supervisor' },
+                { value: 'operator', label: 'Operador' }
+              ]}
+            />
+            
+            {error && (
+              <div className="p-3 bg-red-50 border border-red-100 rounded-xl text-red-600 text-xs font-medium">
+                {error}
+              </div>
+            )}
+
+            <div className="pt-4 flex gap-3">
+              <Button variant="outline" className="flex-1" onClick={() => setIsEditModalOpen(false)}>
+                Cancelar
+              </Button>
+              <Button type="submit" className="flex-1" disabled={loading}>
+                {loading ? 'Salvando...' : 'Salvar Alterações'}
+              </Button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {users.map(u => (
           <Card key={u.uid} className="p-6">
@@ -2368,13 +2446,28 @@ function UsersSection({ user }: { user: UserProfile }) {
                 <p className="font-bold text-zinc-900 truncate">{u.name}</p>
                 <p className="text-xs text-zinc-500 truncate">{u.username ? `@${u.username}` : 'Sem usuário'}</p>
               </div>
-              {user.role === 'admin' && u.uid !== user.uid && (
-                <button 
-                  onClick={() => handleDeleteUser(u.uid)}
-                  className="p-2 text-zinc-300 hover:text-red-500 transition-colors"
-                >
-                  <Trash2 size={18} />
-                </button>
+              {user.role === 'admin' && (
+                <div className="flex items-center gap-1">
+                  <button 
+                    onClick={() => {
+                      setEditingUser(u);
+                      setIsEditModalOpen(true);
+                    }}
+                    className="p-2 text-zinc-300 hover:text-blue-500 transition-colors"
+                    title="Editar Usuário"
+                  >
+                    <Edit3 size={18} />
+                  </button>
+                  {u.uid !== user.uid && (
+                    <button 
+                      onClick={() => handleDeleteUser(u.uid)}
+                      className="p-2 text-zinc-300 hover:text-red-500 transition-colors"
+                      title="Excluir Usuário"
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                  )}
+                </div>
               )}
             </div>
             
