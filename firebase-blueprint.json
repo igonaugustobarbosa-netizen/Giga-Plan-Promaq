@@ -1,0 +1,114 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile with role-based access control",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "name": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "supervisor", "operator"] }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "Equipment": {
+      "title": "Equipment",
+      "description": "Industrial equipment details",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "model": { "type": "string" },
+        "serialNumber": { "type": "string" },
+        "technicalInfo": { "type": "string" },
+        "photoUrl": { "type": "string" },
+        "manualUrl": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name"]
+    },
+    "Part": {
+      "title": "Part",
+      "description": "Spare parts for equipment",
+      "type": "object",
+      "properties": {
+        "equipmentId": { "type": "string" },
+        "name": { "type": "string" },
+        "code": { "type": "string" },
+        "cost": { "type": "number" }
+      },
+      "required": ["equipmentId", "name", "code", "cost"]
+    },
+    "MaintenancePlan": {
+      "title": "Maintenance Plan",
+      "description": "Scheduled preventive maintenance",
+      "type": "object",
+      "properties": {
+        "equipmentId": { "type": "string" },
+        "description": { "type": "string" },
+        "intervalHours": { "type": "number" },
+        "partsRequired": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "partId": { "type": "string" },
+              "quantity": { "type": "number" }
+            }
+          }
+        }
+      },
+      "required": ["equipmentId", "description", "intervalHours"]
+    },
+    "MaintenanceRecord": {
+      "title": "Maintenance Record",
+      "description": "Execution of a maintenance plan",
+      "type": "object",
+      "properties": {
+        "equipmentId": { "type": "string" },
+        "planId": { "type": "string" },
+        "status": { "type": "string", "enum": ["planned", "in-progress", "completed"] },
+        "startDate": { "type": "string", "format": "date-time" },
+        "endDate": { "type": "string", "format": "date-time" },
+        "totalPartsCost": { "type": "number" },
+        "totalLaborCost": { "type": "number" },
+        "usedParts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "partId": { "type": "string" },
+              "name": { "type": "string" },
+              "quantity": { "type": "number" },
+              "unitCost": { "type": "number" }
+            }
+          }
+        },
+        "notes": { "type": "string" }
+      },
+      "required": ["equipmentId", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "/equipment/{equipmentId}": {
+      "schema": "Equipment",
+      "description": "Equipment collection"
+    },
+    "/equipment/{equipmentId}/parts/{partId}": {
+      "schema": "Part",
+      "description": "Parts subcollection"
+    },
+    "/equipment/{equipmentId}/plans/{planId}": {
+      "schema": "MaintenancePlan",
+      "description": "Maintenance plans subcollection"
+    },
+    "/maintenance_records/{recordId}": {
+      "schema": "MaintenanceRecord",
+      "description": "Maintenance execution records"
+    }
+  }
+}

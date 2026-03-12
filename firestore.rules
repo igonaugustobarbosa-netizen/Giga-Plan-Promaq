@@ -1,0 +1,114 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    // Collection: users
+    // Fields: uid, email, name, role (admin, supervisor, operator)
+    //
+    // Collection: equipment
+    // Fields: name, model, serialNumber, technicalInfo, photoUrl, manualUrl, createdAt
+    //
+    // Subcollection: equipment/{id}/parts
+    // Fields: equipmentId, name, code, cost
+    //
+    // Subcollection: equipment/{id}/plans
+    // Fields: equipmentId, description, intervalHours, partsRequired
+    //
+    // Collection: maintenance_records
+    // Fields: equipmentId, planId, status, startDate, endDate, totalPartsCost, totalLaborCost, usedParts, notes
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+        (request.auth.token.email == "igonaugustobarbosa@gmail.com" && request.auth.token.email_verified == true)
+      );
+    }
+
+    function isSupervisor() {
+      return isAuthenticated() && (
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'supervisor' || isAdmin()
+      );
+    }
+
+    function isOperator() {
+      return isAuthenticated() && (
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'operator' || isSupervisor()
+      );
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'role']) &&
+             data.role in ['admin', 'supervisor', 'operator'] &&
+             data.email is string && data.uid is string;
+    }
+
+    function isValidEquipment(data) {
+      return data.keys().hasAll(['name']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 200;
+    }
+
+    function isValidPart(data) {
+      return data.keys().hasAll(['name', 'code', 'cost']) &&
+             data.name is string && data.code is string && data.cost is number;
+    }
+
+    function isValidPlan(data) {
+      return data.keys().hasAll(['description', 'intervalHours']) &&
+             data.description is string && data.intervalHours is number;
+    }
+
+    function isValidRecord(data) {
+      return data.keys().hasAll(['equipmentId', 'status']) &&
+             data.status in ['planned', 'in-progress', 'completed'] &&
+             (!('totalPartsCost' in data) || data.totalPartsCost is number) &&
+             (!('totalLaborCost' in data) || data.totalLaborCost is number) &&
+             (!('usedParts' in data) || data.usedParts is list);
+    }
+
+    // Rules
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidUser(request.resource.data) && (isOwner(userId) || isAdmin());
+      allow update: if isAuthenticated() && isValidUser(request.resource.data) && (isAdmin() || (isOwner(userId) && request.resource.data.role == resource.data.role));
+      allow delete: if isAdmin();
+    }
+
+    match /equipment/{equipmentId} {
+      allow read: if isOperator();
+      allow create, update: if isSupervisor() && isValidEquipment(request.resource.data);
+      allow delete: if isAdmin();
+
+      match /parts/{partId} {
+        allow read: if isOperator();
+        allow write: if isSupervisor() && isValidPart(request.resource.data);
+      }
+
+      match /plans/{planId} {
+        allow read: if isOperator();
+        allow write: if isSupervisor() && isValidPlan(request.resource.data);
+      }
+    }
+
+    match /maintenance_records/{recordId} {
+      allow read: if isOperator();
+      allow create, update: if isOperator() && isValidRecord(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /test/connection {
+      allow read: if true;
+    }
+  }
+}
