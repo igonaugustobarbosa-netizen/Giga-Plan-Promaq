@@ -287,6 +287,16 @@ export default function App() {
     }
   };
 
+  const handleDeleteMaintenance = async (id: string) => {
+    if (confirm('Tem certeza que deseja excluir este registro de manutenção?')) {
+      try {
+        await deleteDoc(doc(db, 'maintenance_records', id));
+      } catch (err: any) {
+        handleFirestoreError(err, OperationType.DELETE, 'maintenance_records');
+      }
+    }
+  };
+
   const handleTestLogin = (role: UserRole) => {
     const mockUser: UserProfile = {
       uid: `test-${role}`,
@@ -529,11 +539,11 @@ export default function App() {
         </header>
 
         <div className="p-8 max-w-7xl mx-auto">
-          {activeTab === 'dashboard' && <Dashboard equipment={equipment} records={maintenanceRecords} />}
+          {activeTab === 'dashboard' && <Dashboard equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} />}
           {activeTab === 'equipment' && <EquipmentSection equipment={equipment} user={user} />}
-          {activeTab === 'maintenance' && <MaintenanceSection equipment={equipment} records={maintenanceRecords} user={user} />}
+          {activeTab === 'maintenance' && <MaintenanceSection equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} />}
           {activeTab === 'parts' && <PartsSection equipment={equipment} user={user} />}
-          {activeTab === 'reports' && <ReportsSection equipment={equipment} records={maintenanceRecords} />}
+          {activeTab === 'reports' && <ReportsSection equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} />}
           {activeTab === 'users' && <UsersSection user={user} />}
         </div>
       </main>
@@ -559,7 +569,7 @@ function NavItem({ active, onClick, icon, label }: any) {
 
 // --- Sections ---
 
-function Dashboard({ equipment, records }: { equipment: Equipment[], records: MaintenanceRecord[] }) {
+function Dashboard({ equipment, records, user, onDeleteRecord }: { equipment: Equipment[], records: MaintenanceRecord[], user: UserProfile, onDeleteRecord: (id: string) => void }) {
   const activeMaintenances = records.filter(r => r.status === 'in-progress');
   const plannedMaintenances = records.filter(r => r.status === 'planned');
   
@@ -596,9 +606,20 @@ function Dashboard({ equipment, records }: { equipment: Equipment[], records: Ma
                   <p className="font-bold text-zinc-900">{record.equipmentName}</p>
                   <p className="text-xs text-orange-600 font-medium">{record.planDescription}</p>
                 </div>
-                <div className="text-right">
-                  <p className="text-xs font-bold text-zinc-400 uppercase">Início</p>
-                  <p className="text-sm font-bold">{format(parseISO(record.startDate), 'HH:mm')}</p>
+                <div className="text-right flex items-center gap-3">
+                  <div>
+                    <p className="text-xs font-bold text-zinc-400 uppercase">Início</p>
+                    <p className="text-sm font-bold">{format(parseISO(record.startDate), 'HH:mm')}</p>
+                  </div>
+                  {user.role !== 'operator' && (
+                    <button 
+                      onClick={() => onDeleteRecord(record.id)}
+                      className="text-zinc-300 hover:text-red-500 transition-colors ml-2"
+                      title="Excluir Manutenção"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  )}
                 </div>
               </div>
             )) : (
@@ -1224,7 +1245,7 @@ function PlansList({ equipment, user }: { equipment: Equipment, user: UserProfil
   );
 }
 
-function MaintenanceSection({ equipment, records, user }: { equipment: Equipment[], records: MaintenanceRecord[], user: UserProfile }) {
+function MaintenanceSection({ equipment, records, user, onDeleteRecord }: { equipment: Equipment[], records: MaintenanceRecord[], user: UserProfile, onDeleteRecord: (id: string) => void }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isCompleteModalOpen, setIsCompleteModalOpen] = useState(false);
@@ -1500,6 +1521,15 @@ function MaintenanceSection({ equipment, records, user }: { equipment: Equipment
                       <StopCircle size={18} /> Finalizar
                     </Button>
                   </div>
+                )}
+                {user.role !== 'operator' && (
+                  <button 
+                    onClick={() => onDeleteRecord(record.id)}
+                    className="p-2 text-zinc-300 hover:text-red-500 transition-colors"
+                    title="Excluir Manutenção"
+                  >
+                    <Trash2 size={18} />
+                  </button>
                 )}
               </div>
             </div>
@@ -1822,7 +1852,7 @@ function PartsSection({ equipment, user }: { equipment: Equipment[], user: UserP
   );
 }
 
-function ReportsSection({ equipment, records }: { equipment: Equipment[], records: MaintenanceRecord[] }) {
+function ReportsSection({ equipment, records, user, onDeleteRecord }: { equipment: Equipment[], records: MaintenanceRecord[], user: UserProfile, onDeleteRecord: (id: string) => void }) {
   const [filterDate, setFilterDate] = useState(format(new Date(), 'yyyy-MM'));
   const [selectedEquipId, setSelectedEquipId] = useState('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'planned' | 'in-progress' | 'completed'>('all');
@@ -1955,6 +1985,7 @@ function ReportsSection({ equipment, records }: { equipment: Equipment[], record
               <th className="p-4 text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Mão de Obra</th>
               <th className="p-4 text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Peças (R$)</th>
               <th className="p-4 text-[10px] font-bold text-zinc-400 uppercase tracking-widest text-right">Total</th>
+              <th className="p-4 text-[10px] font-bold text-zinc-400 uppercase tracking-widest text-center">Ações</th>
             </tr>
           </thead>
           <tbody>
@@ -2005,12 +2036,23 @@ function ReportsSection({ equipment, records }: { equipment: Equipment[], record
                   )}
                 </td>
                 <td className="p-4 text-sm font-bold text-right">R$ {((record.totalLaborCost || 0) + (record.totalPartsCost || 0)).toFixed(2)}</td>
+                <td className="p-4 text-center">
+                  {user.role !== 'operator' && (
+                    <button 
+                      onClick={() => onDeleteRecord(record.id)}
+                      className="text-zinc-300 hover:text-red-500 transition-colors"
+                      title="Excluir Registro"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
           <tfoot>
             <tr className="bg-zinc-50 font-bold">
-              <td colSpan={7} className="p-4 text-right text-zinc-500 uppercase tracking-widest text-[10px]">Soma Total</td>
+              <td colSpan={8} className="p-4 text-right text-zinc-500 uppercase tracking-widest text-[10px]">Soma Total</td>
               <td className="p-4 text-right text-lg">R$ {totalCost.toFixed(2)}</td>
             </tr>
           </tfoot>
