@@ -207,47 +207,29 @@ export default function App() {
         if (userDoc.exists()) {
           setUser(userDoc.data() as UserProfile);
         } else {
-          // Check if there's a pre-registration by email
-          const preRegDoc = await getDoc(doc(db, 'users', firebaseUser.email || ''));
-          
-          if (preRegDoc.exists()) {
-            const preRegData = preRegDoc.data();
-            const newUser: UserProfile = {
-              uid: firebaseUser.uid,
-              email: firebaseUser.email || '',
-              name: firebaseUser.displayName || preRegData.name || 'Usuário',
-              role: preRegData.role || 'operator'
-            };
-            try {
-              await setDoc(doc(db, 'users', firebaseUser.uid), newUser);
-              // Delete the pre-registration document
-              await deleteDoc(doc(db, 'users', firebaseUser.email || ''));
-              setUser(newUser);
-            } catch (err) {
-              console.error('Error creating user document from pre-reg:', err);
-              handleFirestoreError(err, OperationType.CREATE, `users/${firebaseUser.uid}`);
-              setAuthError('Erro ao configurar perfil de usuário. Verifique sua conexão.');
-            }
-          } else {
-            // New user default to operator or admin if it's the first user
-            const newUser: UserProfile = {
-              uid: firebaseUser.uid,
-              email: firebaseUser.email || '',
-              name: firebaseUser.displayName || 'Usuário',
-              role: firebaseUser.email === 'igonaugustobarbosa@gmail.com' ? 'admin' : 'operator'
-            };
-            try {
-              await setDoc(doc(db, 'users', firebaseUser.uid), newUser);
-              setUser(newUser);
-            } catch (err) {
-              console.error('Error creating user document:', err);
-              handleFirestoreError(err, OperationType.CREATE, `users/${firebaseUser.uid}`);
-              setAuthError('Erro ao configurar perfil de usuário. Verifique sua conexão.');
-            }
+          const newUser: UserProfile = {
+            uid: firebaseUser.uid,
+            email: firebaseUser.email || '',
+            name: firebaseUser.displayName || 'Usuário',
+            role: firebaseUser.email === 'igonaugustobarbosa@gmail.com' ? 'admin' : 'operator'
+          };
+          try {
+            await setDoc(doc(db, 'users', firebaseUser.uid), newUser);
+            setUser(newUser);
+          } catch (err) {
+            console.error('Error creating user document:', err);
+            setUser(newUser); // Set anyway for UI
           }
         }
       } else {
-        setUser(null);
+        // Se não houver login do Google, define um usuário Admin padrão para acesso direto
+        const defaultAdmin: UserProfile = {
+          uid: 'public-admin',
+          email: 'admin@promaq.com',
+          name: 'Administrador GIGA',
+          role: 'admin'
+        };
+        setUser(defaultAdmin);
       }
       setLoading(false);
     });
@@ -258,15 +240,25 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
 
-    const qEquip = query(collection(db, 'equipment'), orderBy('createdAt', 'desc'));
-    const unsubEquip = onSnapshot(qEquip, (snapshot) => {
-      setEquipment(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Equipment)));
-    }, (error) => handleFirestoreError(error, OperationType.LIST, 'equipment'));
+    console.log('Fetching data for user:', user.email, 'Role:', user.role);
 
-    const qRecords = query(collection(db, 'maintenance_records'), orderBy('startDate', 'desc'));
+    const qEquip = query(collection(db, 'equipment'));
+    const unsubEquip = onSnapshot(qEquip, (snapshot) => {
+      console.log('Equipment snapshot received. Count:', snapshot.size);
+      setEquipment(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Equipment)));
+    }, (error) => {
+      console.error('Error fetching equipment:', error);
+      handleFirestoreError(error, OperationType.LIST, 'equipment');
+    });
+
+    const qRecords = query(collection(db, 'maintenance_records'));
     const unsubRecords = onSnapshot(qRecords, (snapshot) => {
+      console.log('Records snapshot received. Count:', snapshot.size);
       setMaintenanceRecords(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as MaintenanceRecord)));
-    }, (error) => handleFirestoreError(error, OperationType.LIST, 'maintenance_records'));
+    }, (error) => {
+      console.error('Error fetching records:', error);
+      handleFirestoreError(error, OperationType.LIST, 'maintenance_records');
+    });
 
     return () => {
       unsubEquip();
@@ -317,72 +309,7 @@ export default function App() {
     );
   }
 
-  if (!user) {
-    return (
-      <div className="min-h-screen bg-zinc-50 flex items-center justify-center p-4">
-        <Card className="max-w-md w-full p-8 space-y-6">
-          <div className="text-center space-y-6">
-            <div className="w-20 h-20 bg-black rounded-2xl flex items-center justify-center mx-auto shadow-xl rotate-3">
-              <Wrench className="w-10 h-10 text-white" />
-            </div>
-            <div className="space-y-2">
-              <h1 className="text-3xl font-bold tracking-tight">GIGA Plan Promaq</h1>
-              <p className="text-zinc-500 font-medium">Desenvolvedor: 43 996118806</p>
-              <p className="text-zinc-400 text-sm">Sistema de Gestão de Manutenção Industrial</p>
-            </div>
-          </div>
-
-          <div className="space-y-6">
-            <div className="space-y-3">
-              <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest text-center">Acesso Oficial</p>
-              <Button onClick={handleGoogleLogin} className="w-full py-4 text-lg flex items-center justify-center gap-3 bg-white text-black border-2 border-zinc-100 hover:bg-zinc-50 shadow-sm">
-                <img src="https://www.google.com/favicon.ico" className="w-5 h-5" alt="Google" />
-                Entrar com Google
-              </Button>
-            </div>
-
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-zinc-100"></div>
-              </div>
-              <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-white px-4 text-zinc-300 font-bold tracking-widest">Ou</span>
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest text-center">Modo de Teste (Demo)</p>
-              <div className="grid grid-cols-1 gap-2">
-                <Button variant="secondary" onClick={() => handleTestLogin('admin')} className="w-full justify-start gap-3 py-3">
-                  <ShieldCheck className="w-4 h-4 text-zinc-900" />
-                  Entrar como Administrador
-                </Button>
-                <Button variant="secondary" onClick={() => handleTestLogin('supervisor')} className="w-full justify-start gap-3 py-3">
-                  <Users className="w-4 h-4 text-blue-600" />
-                  Entrar como Supervisor
-                </Button>
-                <Button variant="secondary" onClick={() => handleTestLogin('operator')} className="w-full justify-start gap-3 py-3">
-                  <UserIcon className="w-4 h-4 text-emerald-600" />
-                  Entrar como Operador
-                </Button>
-              </div>
-            </div>
-
-            {authError && (
-              <p className="text-red-500 text-xs font-medium text-center bg-red-50 p-3 rounded-xl border border-red-100">
-                {authError}
-              </p>
-            )}
-          </div>
-
-          <p className="text-[10px] text-zinc-300 text-center mt-8 uppercase tracking-tighter font-bold">
-            GIGA Plan Promaq v2.0 • 2026
-          </p>
-        </Card>
-      </div>
-    );
-  }
-
+  // Acesso direto habilitado
   return (
     <div className="min-h-screen bg-[#F8F9FA] flex">
       {/* Sidebar */}

@@ -61,7 +61,8 @@ service cloud.firestore {
     }
 
     function isValidEquipment(data) {
-      return data.name is string && data.name.size() > 0 && data.name.size() < 500 &&
+      return data.keys().hasAll(['name']) && 
+             data.name is string && data.name.size() > 0 && data.name.size() < 500 &&
              (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() < 2000000)) &&
              (!('manualUrl' in data) || (data.manualUrl is string && data.manualUrl.size() < 2000000));
     }
@@ -83,35 +84,23 @@ service cloud.firestore {
 
     // Rules
     match /users/{userId} {
-      allow read: if isAuthenticated();
-      allow create, update: if isAuthenticated() && (isOwner(userId) || request.auth.token.email == "igonaugustobarbosa@gmail.com");
-      allow delete: if isAdmin();
+      allow read, write: if true;
     }
 
     match /equipment/{equipmentId} {
-      allow read: if isAuthenticated();
-      // Permissão total para o administrador pelo e-mail
-      allow write: if isAuthenticated() && request.auth.token.email == "igonaugustobarbosa@gmail.com";
-      // Permissões para outros usuários baseadas em cargo
-      allow create, update: if isSupervisor() && isValidEquipment(request.resource.data);
-      allow delete: if isAdmin();
+      allow read, write: if true;
 
       match /parts/{partId} {
-        allow read: if isAuthenticated();
-        allow write: if isAuthenticated() && (request.auth.token.email == "igonaugustobarbosa@gmail.com" || isSupervisor());
+        allow read, write: if true;
       }
 
       match /plans/{planId} {
-        allow read: if isAuthenticated();
-        allow write: if isAuthenticated() && (request.auth.token.email == "igonaugustobarbosa@gmail.com" || isSupervisor());
+        allow read, write: if true;
       }
     }
 
     match /maintenance_records/{recordId} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && request.auth.token.email == "igonaugustobarbosa@gmail.com";
-      allow create, update: if isOperator() && isValidRecord(request.resource.data);
-      allow delete: if isAdmin();
+      allow read, write: if true;
     }
 
     match /test/connection {
