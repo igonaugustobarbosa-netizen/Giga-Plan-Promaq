@@ -1,12 +1,19 @@
 import React, { useState, useEffect } from 'react';
+import { initializeApp } from 'firebase/app';
 import { 
   auth, db 
 } from './firebase';
+import firebaseConfig from '../firebase-applet-config.json';
 import { 
   onAuthStateChanged, 
-  signInWithPopup, 
-  GoogleAuthProvider, 
-  signOut 
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signOut,
+  getAuth,
+  signOut as secondarySignOut,
+  sendPasswordResetEmail,
+  GoogleAuthProvider,
+  signInWithPopup
 } from 'firebase/auth';
 import { 
   doc, 
@@ -151,6 +158,14 @@ export default function App() {
   const [selectedEquipment, setSelectedEquipment] = useState<Equipment | null>(null);
   const [selectedRecord, setSelectedRecord] = useState<MaintenanceRecord | null>(null);
 
+  // Auth Form States
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [isForgotPassword, setIsForgotPassword] = useState(false);
+  const [authError, setAuthError] = useState('');
+  const [authSuccess, setAuthSuccess] = useState('');
+
   // Auth Effect
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
@@ -197,12 +212,39 @@ export default function App() {
     };
   }, [user]);
 
-  const handleLogin = async () => {
+  const handleAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError('');
+    setAuthSuccess('');
+    try {
+      if (isForgotPassword) {
+        await sendPasswordResetEmail(auth, email);
+        setAuthSuccess('E-mail de redefinição enviado! Verifique sua caixa de entrada.');
+        setIsForgotPassword(false);
+      } else if (isRegistering) {
+        await createUserWithEmailAndPassword(auth, email, password);
+      } else {
+        await signInWithEmailAndPassword(auth, email, password);
+      }
+    } catch (error: any) {
+      console.error('Auth error:', error);
+      let message = error.message;
+      if (error.code === 'auth/user-not-found') message = 'Usuário não encontrado.';
+      if (error.code === 'auth/wrong-password') message = 'Senha incorreta.';
+      if (error.code === 'auth/invalid-email') message = 'E-mail inválido.';
+      if (error.code === 'auth/popup-closed-by-user') message = 'Login cancelado.';
+      setAuthError(message);
+    }
+  };
+
+  const handleGoogleLogin = async () => {
+    setAuthError('');
     try {
       const provider = new GoogleAuthProvider();
       await signInWithPopup(auth, provider);
-    } catch (error) {
-      console.error('Login error:', error);
+    } catch (error: any) {
+      console.error('Google Auth error:', error);
+      setAuthError(error.message);
     }
   };
 
@@ -222,19 +264,102 @@ export default function App() {
   if (!user) {
     return (
       <div className="min-h-screen bg-zinc-50 flex items-center justify-center p-4">
-        <Card className="max-w-md w-full p-8 text-center space-y-6">
-          <div className="w-20 h-20 bg-black rounded-2xl flex items-center justify-center mx-auto shadow-xl rotate-3">
-            <Wrench className="w-10 h-10 text-white" />
+        <Card className="max-w-md w-full p-8 space-y-6">
+          <div className="text-center space-y-6">
+            <div className="w-20 h-20 bg-black rounded-2xl flex items-center justify-center mx-auto shadow-xl rotate-3">
+              <Wrench className="w-10 h-10 text-white" />
+            </div>
+            <div className="space-y-2">
+              <h1 className="text-3xl font-bold tracking-tight">GIGA Plan Promaq</h1>
+              <p className="text-zinc-500 font-medium">Desenvolvedor: 43 996118806</p>
+              <p className="text-zinc-400 text-sm">Sistema de Gestão de Manutenção Industrial</p>
+            </div>
           </div>
-          <div className="space-y-2">
-            <h1 className="text-3xl font-bold tracking-tight">GIGA Plan Promaq</h1>
-            <p className="text-zinc-500 font-medium">Desenvolvedor: 43 996118806</p>
-            <p className="text-zinc-400 text-sm">Sistema de Gestão de Manutenção Industrial</p>
+
+          <form onSubmit={handleAuth} className="space-y-4">
+            <Input 
+              label="E-mail" 
+              type="email" 
+              value={email} 
+              onChange={(e: any) => setEmail(e.target.value)} 
+              required 
+            />
+            {!isForgotPassword && (
+              <Input 
+                label="Senha" 
+                type="password" 
+                value={password} 
+                onChange={(e: any) => setPassword(e.target.value)} 
+                required 
+              />
+            )}
+            
+            {authError && (
+              <p className="text-red-500 text-xs font-medium text-center bg-red-50 p-2 rounded-lg border border-red-100">
+                {authError}
+              </p>
+            )}
+
+            {authSuccess && (
+              <p className="text-emerald-500 text-xs font-medium text-center bg-emerald-50 p-2 rounded-lg border border-emerald-100">
+                {authSuccess}
+              </p>
+            )}
+
+            <Button type="submit" className="w-full py-4 text-lg">
+              {isForgotPassword ? 'Enviar E-mail de Recuperação' : isRegistering ? 'Criar Conta' : 'Entrar'}
+            </Button>
+          </form>
+
+          {!isForgotPassword && !isRegistering && (
+            <div className="space-y-4">
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-zinc-200"></div>
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-white px-2 text-zinc-400 font-bold">Ou continue com</span>
+                </div>
+              </div>
+
+              <Button variant="secondary" onClick={handleGoogleLogin} className="w-full py-3">
+                <img src="https://www.google.com/favicon.ico" className="w-4 h-4" alt="Google" />
+                Entrar com Google
+              </Button>
+            </div>
+          )}
+
+          <div className="flex flex-col gap-3 text-center">
+            {!isForgotPassword && (
+              <button 
+                onClick={() => {
+                  setIsForgotPassword(true);
+                  setAuthError('');
+                  setAuthSuccess('');
+                }}
+                className="text-xs text-zinc-400 hover:text-zinc-600 font-medium transition-colors"
+              >
+                Esqueceu sua senha?
+              </button>
+            )}
+            
+            <button 
+              onClick={() => {
+                if (isForgotPassword) {
+                  setIsForgotPassword(false);
+                } else {
+                  setIsRegistering(!isRegistering);
+                }
+                setAuthError('');
+                setAuthSuccess('');
+              }}
+              className="text-sm text-zinc-500 hover:text-black font-medium transition-colors"
+            >
+              {isForgotPassword ? 'Voltar para o Login' : isRegistering ? 'Já tem uma conta? Entre aqui' : 'Não tem uma conta? Cadastre-se'}
+            </button>
           </div>
-          <Button onClick={handleLogin} className="w-full py-4 text-lg">
-            Entrar com Google
-          </Button>
-          <p className="text-xs text-zinc-400">
+
+          <p className="text-xs text-zinc-400 text-center">
             Acesso restrito a pessoal autorizado.
           </p>
         </Card>
@@ -1807,6 +1932,9 @@ function ReportsSection({ equipment, records }: { equipment: Equipment[], record
 
 function UsersSection({ user }: { user: UserProfile }) {
   const [users, setUsers] = useState<UserProfile[]>([]);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     const q = query(collection(db, 'users'));
@@ -1816,7 +1944,57 @@ function UsersSection({ user }: { user: UserProfile }) {
   }, []);
 
   const handleRoleChange = async (uid: string, newRole: UserRole) => {
+    if (uid === user.uid) {
+      alert('Você não pode alterar seu próprio nível de acesso.');
+      return;
+    }
     await updateDoc(doc(db, 'users', uid), { role: newRole });
+  };
+
+  const handleCreateUser = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    
+    const formData = new FormData(e.currentTarget);
+    const email = formData.get('email') as string;
+    const password = formData.get('password') as string;
+    const name = formData.get('name') as string;
+    const role = formData.get('role') as UserRole;
+
+    try {
+      // Create a secondary app to create user without logging out current admin
+      const secondaryApp = initializeApp(firebaseConfig, 'Secondary');
+      const secondaryAuth = getAuth(secondaryApp);
+      
+      const userCredential = await createUserWithEmailAndPassword(secondaryAuth, email, password);
+      const uid = userCredential.user.uid;
+      
+      await setDoc(doc(db, 'users', uid), {
+        uid,
+        email,
+        name,
+        role
+      });
+
+      await secondarySignOut(secondaryAuth);
+      setIsModalOpen(false);
+    } catch (err: any) {
+      console.error('Error creating user:', err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteUser = async (uid: string) => {
+    if (uid === user.uid) {
+      alert('Você não pode excluir seu próprio usuário.');
+      return;
+    }
+    if (confirm('Tem certeza que deseja excluir este usuário? O acesso será revogado, mas o registro no Firebase Auth permanecerá (exclusão manual necessária no console para remoção total).')) {
+      await deleteDoc(doc(db, 'users', uid));
+    }
   };
 
   return (
@@ -1824,40 +2002,90 @@ function UsersSection({ user }: { user: UserProfile }) {
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-2xl font-bold text-zinc-900">Gestão de Usuários</h3>
-          <p className="text-zinc-500">Controle os níveis de acesso ao sistema.</p>
+          <p className="text-zinc-500">Controle quem tem acesso ao sistema e seus níveis de permissão.</p>
         </div>
+        {user.role === 'admin' && (
+          <Button onClick={() => setIsModalOpen(true)}>
+            <Plus size={20} /> Novo Usuário
+          </Button>
+        )}
       </div>
 
-      <div className="grid grid-cols-1 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {users.map(u => (
           <Card key={u.uid} className="p-6">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-full bg-zinc-100 flex items-center justify-center">
-                  <UserIcon className="text-zinc-400" />
-                </div>
-                <div>
-                  <p className="font-bold text-zinc-900">{u.name}</p>
-                  <p className="text-sm text-zinc-500">{u.email}</p>
-                </div>
+            <div className="flex items-center gap-4 mb-4">
+              <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
+                u.role === 'admin' ? 'bg-zinc-900 text-white' : 
+                u.role === 'supervisor' ? 'bg-blue-100 text-blue-600' : 
+                'bg-zinc-100 text-zinc-500'
+              }`}>
+                {u.role === 'admin' ? <Shield size={24} /> : <UserIcon size={24} />}
               </div>
-              <div className="flex items-center gap-4">
-                <Select 
-                  value={u.role} 
-                  onChange={(e: any) => handleRoleChange(u.uid, e.target.value)}
-                  options={[
-                    { value: 'admin', label: 'Administrador' },
-                    { value: 'supervisor', label: 'Supervisor' },
-                    { value: 'operator', label: 'Operador' }
-                  ]}
-                  disabled={u.uid === user.uid}
-                />
-                {u.role === 'admin' ? <Shield className="text-blue-500" size={20} /> : <UserIcon className="text-zinc-300" size={20} />}
+              <div className="flex-1 min-w-0">
+                <p className="font-bold text-zinc-900 truncate">{u.name}</p>
+                <p className="text-xs text-zinc-500 truncate">{u.email}</p>
               </div>
+              {user.role === 'admin' && u.uid !== user.uid && (
+                <button 
+                  onClick={() => handleDeleteUser(u.uid)}
+                  className="p-2 text-zinc-300 hover:text-red-500 transition-colors"
+                >
+                  <Trash2 size={18} />
+                </button>
+              )}
+            </div>
+            
+            <div className="pt-4 border-t border-zinc-100">
+              <Select 
+                label="Nível de Acesso"
+                value={u.role} 
+                onChange={(e: any) => handleRoleChange(u.uid, e.target.value)}
+                options={[
+                  { value: 'admin', label: 'Administrador' },
+                  { value: 'supervisor', label: 'Supervisor' },
+                  { value: 'operator', label: 'Operador' }
+                ]}
+                disabled={u.uid === user.uid || user.role !== 'admin'}
+              />
             </div>
           </Card>
         ))}
       </div>
+
+      <Modal 
+        isOpen={isModalOpen} 
+        onClose={() => setIsModalOpen(false)} 
+        title="Criar Novo Usuário"
+      >
+        <form onSubmit={handleCreateUser} className="space-y-4">
+          <Input label="Nome Completo" name="name" required />
+          <Input label="E-mail" name="email" type="email" required />
+          <Input label="Senha" name="password" type="password" required minLength={6} />
+          <Select 
+            label="Nível de Acesso" 
+            name="role" 
+            options={[
+              { value: 'operator', label: 'Operador (Apenas visualização e registros)' },
+              { value: 'supervisor', label: 'Supervisor (Gestão de planos e peças)' },
+              { value: 'admin', label: 'Administrador (Acesso total)' }
+            ]} 
+          />
+          
+          {error && (
+            <p className="text-red-500 text-xs font-medium text-center bg-red-50 p-2 rounded-lg border border-red-100">
+              {error}
+            </p>
+          )}
+
+          <div className="flex justify-end gap-3 pt-4">
+            <Button variant="outline" onClick={() => setIsModalOpen(false)} disabled={loading}>Cancelar</Button>
+            <Button type="submit" disabled={loading}>
+              {loading ? 'Criando...' : 'Criar Usuário'}
+            </Button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 }
