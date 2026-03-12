@@ -1186,7 +1186,11 @@ function PartsList({ equipmentId, user }: { equipmentId: string, user: UserProfi
               <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider">CÓD: {part.code}</p>
             </div>
             <div className="text-right">
-              <p className="font-bold text-zinc-900">R$ {part.cost.toFixed(2)}</p>
+              {!user.role || user.role !== 'operator' ? (
+                <p className="font-bold text-zinc-900">R$ {part.cost.toFixed(2)}</p>
+              ) : (
+                <p className="text-[10px] text-zinc-400 italic italic">Valor restrito</p>
+              )}
             </div>
           </div>
         ))}
@@ -1746,7 +1750,9 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord }: { equi
 
           <div className="space-y-4 border-t border-zinc-100 pt-4">
             <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Peças e Custos</h4>
-            <Input label="Valor Mão de Obra (R$)" name="totalLaborCost" type="number" step="0.01" defaultValue="0" />
+            {user.role !== 'operator' && (
+              <Input label="Valor Mão de Obra (R$)" name="totalLaborCost" type="number" step="0.01" defaultValue="0" />
+            )}
             
             <div className="space-y-2">
               <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Peças Cadastradas</p>
@@ -1756,7 +1762,9 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord }: { equi
                     <div key={part.id} className="flex items-center justify-between p-3 bg-zinc-50 rounded-lg border border-zinc-100">
                       <div className="flex-1">
                         <p className="text-sm font-bold">{part.name}</p>
-                        <p className="text-[10px] text-zinc-400 uppercase font-bold">R$ {part.cost.toFixed(2)}/un</p>
+                        {user.role !== 'operator' && (
+                          <p className="text-[10px] text-zinc-400 uppercase font-bold">R$ {part.cost.toFixed(2)}/un</p>
+                        )}
                       </div>
                       <div className="w-24">
                         <Input 
@@ -1880,13 +1888,15 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord }: { equi
 
             <div className="space-y-4 border-t border-zinc-100 pt-4">
               <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Peças e Custos</h4>
-              <Input 
-                label="Valor Mão de Obra (R$)" 
-                name="totalLaborCost" 
-                type="number" 
-                step="0.01" 
-                defaultValue={editingRecord.totalLaborCost || 0} 
-              />
+              {user.role !== 'operator' && (
+                <Input 
+                  label="Valor Mão de Obra (R$)" 
+                  name="totalLaborCost" 
+                  type="number" 
+                  step="0.01" 
+                  defaultValue={editingRecord.totalLaborCost || 0} 
+                />
+              )}
               
               <div className="space-y-2">
                 <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Peças Utilizadas</p>
@@ -1896,7 +1906,9 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord }: { equi
                       <div key={part.id} className="flex items-center justify-between p-3 bg-zinc-50 rounded-lg border border-zinc-100">
                         <div className="flex-1">
                           <p className="text-sm font-bold">{part.name}</p>
-                          <p className="text-[10px] text-zinc-400 uppercase font-bold">R$ {part.cost.toFixed(2)}/un</p>
+                          {user.role !== 'operator' && (
+                            <p className="text-[10px] text-zinc-400 uppercase font-bold">R$ {part.cost.toFixed(2)}/un</p>
+                          )}
                         </div>
                         <div className="w-24">
                           <Input 
@@ -2000,6 +2012,7 @@ function ReportsSection({ equipment, records, user, onDeleteRecord }: { equipmen
   });
   
   const totalCost = filteredRecords.reduce((acc, r) => acc + (r.totalPartsCost || 0) + (r.totalLaborCost || 0), 0);
+  const isOperator = user.role === 'operator';
 
   const handleExportPDF = () => {
     const doc = new jsPDF();
@@ -2020,31 +2033,48 @@ function ReportsSection({ equipment, records, user, onDeleteRecord }: { equipmen
     // Summary
     doc.setFontSize(12);
     doc.setTextColor(0);
-    doc.text('Resumo Financeiro', 14, 50);
+    doc.text(isOperator ? 'Resumo da Operação' : 'Resumo Financeiro', 14, 50);
     doc.setFontSize(10);
     doc.text(`Total de Intervenções: ${filteredRecords.length}`, 14, 57);
-    doc.text(`Custo Total: R$ ${totalCost.toLocaleString()}`, 14, 62);
+    if (!isOperator) {
+      doc.text(`Custo Total: R$ ${totalCost.toLocaleString()}`, 14, 62);
+    }
     
-    autoTable(doc, {
-      startY: 75,
-      head: [['Data', 'Equipamento', 'Manutenção', 'Status', 'Peças Utilizadas', 'Mão de Obra', 'Custo Peças Detalhado', 'Total Geral']],
-      body: filteredRecords.map(r => [
+    const tableHead = isOperator 
+      ? [['Data Real', 'Programado', 'Equipamento', 'Manutenção', 'Status', 'Peças Utilizadas']]
+      : [['Data Real', 'Programado', 'Equipamento', 'Manutenção', 'Status', 'Peças Utilizadas', 'Mão de Obra', 'Custo Peças Detalhado', 'Total Geral']];
+
+    const tableBody = filteredRecords.map(r => {
+      const base = [
         format(parseISO(r.startDate), 'dd/MM/yyyy'),
+        r.scheduledStartDate ? format(parseISO(r.scheduledStartDate + 'T00:00:00'), 'dd/MM/yyyy') : '--/--/----',
         r.equipmentName || 'N/A',
         r.planDescription || 'N/A',
         r.status,
         r.usedParts?.map(p => `${p.name} (x${p.quantity})`).join('\n') || 'Nenhuma',
+      ];
+      if (isOperator) return base;
+      return [
+        ...base,
         `R$ ${(r.totalLaborCost || 0).toFixed(2)}`,
         r.usedParts?.map(p => `R$ ${(p.unitCost * p.quantity).toFixed(2)} (${p.quantity}x R$ ${p.unitCost.toFixed(2)})`).join('\n') + 
         (r.usedParts && r.usedParts.length > 0 ? `\n----------------\nTotal Peças: R$ ${r.totalPartsCost?.toFixed(2)}` : '\nR$ 0.00'),
         `R$ ${((r.totalLaborCost || 0) + (r.totalPartsCost || 0)).toFixed(2)}`
-      ]),
+      ];
+    });
+
+    autoTable(doc, {
+      startY: isOperator ? 65 : 75,
+      head: tableHead,
+      body: tableBody,
       theme: 'striped',
       headStyles: { fillColor: [0, 0, 0] },
       styles: { fontSize: 7, cellPadding: 2 },
-      columnStyles: {
-        4: { cellWidth: 35 }, // Peças Utilizadas
-        6: { cellWidth: 45 }, // Custo Peças Detalhado
+      columnStyles: isOperator ? {
+        5: { cellWidth: 80 }
+      } : {
+        5: { cellWidth: 35 }, // Peças Utilizadas
+        7: { cellWidth: 45 }, // Custo Peças Detalhado
       }
     });
 
@@ -2104,22 +2134,31 @@ function ReportsSection({ equipment, records, user, onDeleteRecord }: { equipmen
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <StatCard label="Total Intervenções" value={filteredRecords.length} icon={<Wrench className="text-zinc-500" />} />
-        <StatCard label="Custo Total" value={`R$ ${totalCost.toLocaleString()}`} icon={<Clock className="text-emerald-500" />} />
-        <StatCard label="Média por Máquina" value={`R$ ${filteredRecords.length ? (totalCost / filteredRecords.length).toFixed(2) : 0}`} icon={<Filter className="text-blue-500" />} />
+        {!isOperator && (
+          <>
+            <StatCard label="Custo Total" value={`R$ ${totalCost.toLocaleString()}`} icon={<Clock className="text-emerald-500" />} />
+            <StatCard label="Média por Máquina" value={`R$ ${filteredRecords.length ? (totalCost / filteredRecords.length).toFixed(2) : 0}`} icon={<Filter className="text-blue-500" />} />
+          </>
+        )}
       </div>
 
       <Card>
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-zinc-50 border-b border-zinc-200">
-              <th className="p-4 text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Data</th>
+              <th className="p-4 text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Data Real</th>
+              <th className="p-4 text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Programado</th>
               <th className="p-4 text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Equipamento</th>
               <th className="p-4 text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Manutenção</th>
               <th className="p-4 text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Status</th>
               <th className="p-4 text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Peças Detalhadas</th>
-              <th className="p-4 text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Mão de Obra</th>
-              <th className="p-4 text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Peças (R$)</th>
-              <th className="p-4 text-[10px] font-bold text-zinc-400 uppercase tracking-widest text-right">Total</th>
+              {!isOperator && (
+                <>
+                  <th className="p-4 text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Mão de Obra</th>
+                  <th className="p-4 text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Peças (R$)</th>
+                  <th className="p-4 text-[10px] font-bold text-zinc-400 uppercase tracking-widest text-right">Total</th>
+                </>
+              )}
               <th className="p-4 text-[10px] font-bold text-zinc-400 uppercase tracking-widest text-center">Ações</th>
             </tr>
           </thead>
@@ -2127,6 +2166,9 @@ function ReportsSection({ equipment, records, user, onDeleteRecord }: { equipmen
             {filteredRecords.map(record => (
               <tr key={record.id} className="border-b border-zinc-100 hover:bg-zinc-50 transition-colors">
                 <td className="p-4 text-sm font-medium">{format(parseISO(record.startDate), 'dd/MM/yyyy')}</td>
+                <td className="p-4 text-sm font-medium text-zinc-500">
+                  {record.scheduledStartDate ? format(parseISO(record.scheduledStartDate + 'T00:00:00'), 'dd/MM/yyyy') : '--/--/----'}
+                </td>
                 <td className="p-4 text-sm font-bold">{record.equipmentName}</td>
                 <td className="p-4 text-sm text-zinc-500">{record.planDescription}</td>
                 <td className="p-4 text-sm">
@@ -2152,25 +2194,29 @@ function ReportsSection({ equipment, records, user, onDeleteRecord }: { equipmen
                     <span className="text-[10px] text-zinc-400 italic">Nenhuma</span>
                   )}
                 </td>
-                <td className="p-4 text-sm">R$ {record.totalLaborCost?.toFixed(2) || '0.00'}</td>
-                <td className="p-4 text-sm">
-                  {record.usedParts && record.usedParts.length > 0 ? (
-                    <div className="space-y-1">
-                      {record.usedParts.map((p, idx) => (
-                        <div key={idx} className="text-[10px] text-zinc-600 flex flex-col items-end border-b border-zinc-50 last:border-0 pb-1 last:pb-0">
-                          <span className="font-bold">R$ {(p.unitCost * p.quantity).toFixed(2)}</span>
-                          <span className="text-[8px] text-zinc-400">({p.quantity}x R$ {p.unitCost.toFixed(2)})</span>
+                {!isOperator && (
+                  <>
+                    <td className="p-4 text-sm">R$ {record.totalLaborCost?.toFixed(2) || '0.00'}</td>
+                    <td className="p-4 text-sm">
+                      {record.usedParts && record.usedParts.length > 0 ? (
+                        <div className="space-y-1">
+                          {record.usedParts.map((p, idx) => (
+                            <div key={idx} className="text-[10px] text-zinc-600 flex flex-col items-end border-b border-zinc-50 last:border-0 pb-1 last:pb-0">
+                              <span className="font-bold">R$ {(p.unitCost * p.quantity).toFixed(2)}</span>
+                              <span className="text-[8px] text-zinc-400">({p.quantity}x R$ {p.unitCost.toFixed(2)})</span>
+                            </div>
+                          ))}
+                          <div className="pt-1 mt-1 border-t border-zinc-200 font-bold text-right">
+                            Total: R$ {record.totalPartsCost?.toFixed(2)}
+                          </div>
                         </div>
-                      ))}
-                      <div className="pt-1 mt-1 border-t border-zinc-200 font-bold text-right">
-                        Total: R$ {record.totalPartsCost?.toFixed(2)}
-                      </div>
-                    </div>
-                  ) : (
-                    <span>R$ 0.00</span>
-                  )}
-                </td>
-                <td className="p-4 text-sm font-bold text-right">R$ {((record.totalLaborCost || 0) + (record.totalPartsCost || 0)).toFixed(2)}</td>
+                      ) : (
+                        <span>R$ 0.00</span>
+                      )}
+                    </td>
+                    <td className="p-4 text-sm font-bold text-right">R$ {((record.totalLaborCost || 0) + (record.totalPartsCost || 0)).toFixed(2)}</td>
+                  </>
+                )}
                 <td className="p-4 text-center">
                   {user.role !== 'operator' && (
                     <button 
@@ -2185,12 +2231,14 @@ function ReportsSection({ equipment, records, user, onDeleteRecord }: { equipmen
               </tr>
             ))}
           </tbody>
-          <tfoot>
-            <tr className="bg-zinc-50 font-bold">
-              <td colSpan={8} className="p-4 text-right text-zinc-500 uppercase tracking-widest text-[10px]">Soma Total</td>
-              <td className="p-4 text-right text-lg">R$ {totalCost.toFixed(2)}</td>
-            </tr>
-          </tfoot>
+          {!isOperator && (
+            <tfoot>
+              <tr className="bg-zinc-50 font-bold">
+                <td colSpan={9} className="p-4 text-right text-zinc-500 uppercase tracking-widest text-[10px]">Soma Total</td>
+                <td className="p-4 text-right text-lg">R$ {totalCost.toFixed(2)}</td>
+              </tr>
+            </tfoot>
+          )}
         </table>
       </Card>
     </div>
@@ -2205,6 +2253,8 @@ function UsersSection({ user }: { user: UserProfile }) {
   const [error, setError] = useState('');
   const [newUser, setNewUser] = useState({ name: '', username: '', password: '', role: 'operator' as UserRole });
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showEditPassword, setShowEditPassword] = useState(false);
 
   useEffect(() => {
     console.log('UsersSection mounted, setting up snapshot listener');
@@ -2341,14 +2391,26 @@ function UsersSection({ user }: { user: UserProfile }) {
             onChange={(e: any) => setNewUser({ ...newUser, username: e.target.value })}
             required
           />
-          <Input 
-            label="Senha"
-            type="password"
-            placeholder="******"
-            value={newUser.password}
-            onChange={(e: any) => setNewUser({ ...newUser, password: e.target.value })}
-            required
-          />
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Senha</label>
+            <div className="relative">
+              <input 
+                type={showPassword ? "text" : "password"}
+                placeholder="******"
+                value={newUser.password}
+                onChange={(e: any) => setNewUser({ ...newUser, password: e.target.value })}
+                required
+                className="w-full px-4 py-2.5 bg-white border border-zinc-200 rounded-xl text-sm font-bold text-zinc-700 focus:outline-none focus:ring-4 focus:ring-zinc-100 focus:border-zinc-400 transition-all shadow-sm pr-12"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600"
+              >
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
+          </div>
           <Select 
             label="Nível de Acesso"
             value={newUser.role}
@@ -2395,13 +2457,25 @@ function UsersSection({ user }: { user: UserProfile }) {
               value={editingUser.username}
               disabled
             />
-            <Input 
-              label="Senha"
-              type="password"
-              value={editingUser.password || ''}
-              onChange={(e: any) => setEditingUser({ ...editingUser, password: e.target.value })}
-              required
-            />
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Senha</label>
+              <div className="relative">
+                <input 
+                  type={showEditPassword ? "text" : "password"}
+                  value={editingUser.password || ''}
+                  onChange={(e: any) => setEditingUser({ ...editingUser, password: e.target.value })}
+                  required
+                  className="w-full px-4 py-2.5 bg-white border border-zinc-200 rounded-xl text-sm font-bold text-zinc-700 focus:outline-none focus:ring-4 focus:ring-zinc-100 focus:border-zinc-400 transition-all shadow-sm pr-12"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowEditPassword(!showEditPassword)}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600"
+                >
+                  {showEditPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
+            </div>
             <Select 
               label="Nível de Acesso"
               value={editingUser.role}
