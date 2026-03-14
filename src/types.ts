@@ -71,3 +71,12 @@ export interface MaintenanceRecord {
   equipmentName?: string;
   planDescription?: string;
 }
+
+export interface AppNotification {
+  id: string;
+  title: string;
+  description: string;
+  type: 'new' | 'maintenance' | 'alert';
+  date: string;
+  readBy?: string[];
+}

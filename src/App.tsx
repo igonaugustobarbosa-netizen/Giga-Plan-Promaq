@@ -59,12 +59,13 @@ import {
   QrCode,
   Printer,
   Menu,
-  X
+  X,
+  MessageCircle
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format, addHours, isAfter, parseISO, subDays, differenceInDays } from 'date-fns';
-import { UserProfile, Equipment, Part, MaintenancePlan, MaintenanceRecord, UserRole, MaintenanceStatus } from './types';
+import { UserProfile, Equipment, Part, MaintenancePlan, MaintenanceRecord, UserRole, MaintenanceStatus, AppNotification } from './types';
 
 // --- Utilities ---
 
@@ -107,8 +108,19 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   return errInfo.error;
 }
 
-const sendAlert = async (message: string) => {
+const sendAlert = async (message: string, title: string = 'Alerta de Sistema', type: 'new' | 'maintenance' | 'alert' = 'alert') => {
   try {
+    // 1. Save to Firestore for in-app notifications
+    const notificationData = {
+      title,
+      description: message,
+      type,
+      date: new Date().toISOString(),
+      readBy: []
+    };
+    await addDoc(collection(db, 'notifications'), notificationData);
+
+    // 2. Simulate WhatsApp
     const q = query(collection(db, 'users'), where('receiveAlerts', '==', true));
     const snapshot = await getDocs(q);
     const users = snapshot.docs.map(d => d.data() as UserProfile);
@@ -118,8 +130,11 @@ const sendAlert = async (message: string) => {
         const cleanPhone = u.phoneNumber.replace(/\D/g, '');
         if (cleanPhone) {
           console.log(`[ALERT SENT TO ${u.name} (${cleanPhone})]: ${message}`);
-          // In a real production app, we would call a WhatsApp/SMS API here.
-          // For this app, we simulate the alert and provide a WhatsApp link if needed.
+          
+          // Browser notification if permitted
+          if ("Notification" in window && Notification.permission === "granted") {
+            new Notification(title, { body: message });
+          }
         }
       }
     });
@@ -245,6 +260,7 @@ export default function App() {
   const [selectedEquipment, setSelectedEquipment] = useState<Equipment | null>(null);
   const [selectedRecord, setSelectedRecord] = useState<MaintenanceRecord | null>(null);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
   const [allPlans, setAllPlans] = useState<MaintenancePlan[]>([]);
   const [notifications, setNotifications] = useState<{ id: string, title: string, description: string, type: 'new' | 'maintenance', date: string }[]>([]);
   const [initialEquipId, setInitialEquipId] = useState<string | null>(null);
@@ -344,63 +360,75 @@ export default function App() {
     return () => unsub();
   }, [user]);
 
-  // Calculate Notifications
+  // Calculate Notifications (Combined Local + Firestore)
   useEffect(() => {
-    const newNotifications: any[] = [];
-    const now = new Date();
+    if (!user) return;
 
-    // 1. New Equipment (last 3 days)
-    equipment.forEach(equip => {
-      const createdDate = equip.createdAt ? parseISO(equip.createdAt) : null;
-      if (createdDate && differenceInDays(now, createdDate) <= 3) {
-        newNotifications.push({
-          id: `new-equip-${equip.id}`,
-          title: 'Novo Equipamento',
-          description: `${equip.name} foi cadastrado recentemente.`,
-          type: 'new',
-          date: equip.createdAt
-        });
-      }
-    });
-
-    // 2. Upcoming Maintenance
-    // We need the latest record for each plan to calculate remaining days
-    allPlans.forEach(plan => {
-      const equip = equipment.find(e => e.id === plan.equipmentId);
-      if (!equip) return;
-
-      const lastRecord = maintenanceRecords
-        .filter(r => r.planId === plan.id && r.status === 'completed')
-        .sort((a, b) => parseISO(b.startDate).getTime() - parseISO(a.startDate).getTime())[0];
-
-      const lastHourMeter = lastRecord?.hourMeter || 0;
-      const nextMaintenanceHour = lastHourMeter + plan.intervalHours;
-      const remainingHours = nextMaintenanceHour - (equip.currentHours || 0);
+    // Listen to persistent notifications from Firestore
+    const q = query(collection(db, 'notifications'), orderBy('date', 'desc'));
+    const unsubFirestore = onSnapshot(q, (snapshot) => {
+      const firestoreNotifications = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as AppNotification));
       
-      if (equip.avgHoursPerDay && equip.avgHoursPerDay > 0) {
-        const days = Math.ceil(remainingHours / equip.avgHoursPerDay);
-        if (days >= 0 && days <= 7) {
-          newNotifications.push({
-            id: `maint-${plan.id}`,
-            title: 'Manutenção Próxima',
-            description: `${equip.name}: ${plan.description} em aprox. ${days} dias.`,
-            type: 'maintenance',
-            date: new Date().toISOString()
-          });
-        } else if (days < 0) {
-          newNotifications.push({
-            id: `maint-overdue-${plan.id}`,
-            title: 'Manutenção Atrasada',
-            description: `${equip.name}: ${plan.description} está atrasada!`,
-            type: 'maintenance',
-            date: new Date().toISOString()
+      // Calculate local derived notifications
+      const localNotifications: any[] = [];
+      const now = new Date();
+
+      // 1. New Equipment (last 3 days)
+      equipment.forEach(equip => {
+        const createdDate = equip.createdAt ? parseISO(equip.createdAt) : null;
+        if (createdDate && differenceInDays(now, createdDate) <= 3) {
+          localNotifications.push({
+            id: `new-equip-${equip.id}`,
+            title: 'Novo Equipamento',
+            description: `${equip.name} foi cadastrado recentemente.`,
+            type: 'new',
+            date: equip.createdAt
           });
         }
-      }
+      });
+
+      // 2. Upcoming Maintenance
+      allPlans.forEach(plan => {
+        const equip = equipment.find(e => e.id === plan.equipmentId);
+        if (!equip) return;
+
+        const lastRecord = maintenanceRecords
+          .filter(r => r.planId === plan.id && r.status === 'completed')
+          .sort((a, b) => parseISO(b.startDate).getTime() - parseISO(a.startDate).getTime())[0];
+
+        const lastHourMeter = lastRecord?.hourMeter || 0;
+        const nextMaintenanceHour = lastHourMeter + plan.intervalHours;
+        const remainingHours = nextMaintenanceHour - (equip.currentHours || 0);
+        
+        if (equip.avgHoursPerDay && equip.avgHoursPerDay > 0) {
+          const days = Math.ceil(remainingHours / equip.avgHoursPerDay);
+          if (days >= 0 && days <= 7) {
+            localNotifications.push({
+              id: `maint-${plan.id}`,
+              title: 'Manutenção Próxima',
+              description: `${equip.name}: ${plan.description} em aprox. ${days} dias.`,
+              type: 'maintenance',
+              date: new Date().toISOString()
+            });
+          } else if (days < 0) {
+            localNotifications.push({
+              id: `maint-overdue-${plan.id}`,
+              title: 'Manutenção Atrasada',
+              description: `${equip.name}: ${plan.description} está atrasada!`,
+              type: 'maintenance',
+              date: new Date().toISOString()
+            });
+          }
+        }
+      });
+
+      // Merge and sort
+      const combined = [...firestoreNotifications, ...localNotifications];
+      setNotifications(combined.sort((a, b) => parseISO(b.date).getTime() - parseISO(a.date).getTime()));
     });
 
-    setNotifications(newNotifications.sort((a, b) => parseISO(b.date).getTime() - parseISO(a.date).getTime()));
-  }, [equipment, allPlans, maintenanceRecords]);
+    return () => unsubFirestore();
+  }, [equipment, allPlans, maintenanceRecords, user]);
 
   const handleGoogleLogin = async () => {
     setAuthError('');
@@ -688,6 +716,20 @@ export default function App() {
             <h2 className="text-lg font-bold text-zinc-900 capitalize">{activeTab}</h2>
           </div>
           <div className="flex items-center gap-4">
+            <button 
+              onClick={async () => {
+                if ("Notification" in window) {
+                  const permission = await Notification.requestPermission();
+                  if (permission === "granted") {
+                    alert("Notificações do navegador ativadas!");
+                  }
+                }
+              }}
+              className="p-2 text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 rounded-full transition-all"
+              title="Ativar Notificações do Navegador"
+            >
+              <Bell size={20} />
+            </button>
             <div className="relative">
               <button 
                 onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
@@ -721,15 +763,31 @@ export default function App() {
                       <div className="max-h-96 overflow-y-auto">
                         {notifications.length > 0 ? (
                           notifications.map(notif => (
-                            <div key={notif.id} className="p-4 border-b border-zinc-50 last:border-0 hover:bg-zinc-50 transition-colors cursor-default">
+                            <div key={notif.id} className="p-4 border-b border-zinc-50 last:border-0 hover:bg-zinc-50 transition-colors cursor-default group">
                               <div className="flex gap-3">
                                 <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
-                                  notif.type === 'new' ? 'bg-blue-100 text-blue-600' : 'bg-orange-100 text-orange-600'
+                                  notif.type === 'new' ? 'bg-blue-100 text-blue-600' : 
+                                  notif.type === 'alert' ? 'bg-red-100 text-red-600' :
+                                  'bg-orange-100 text-orange-600'
                                 }`}>
-                                  {notif.type === 'new' ? <Plus size={14} /> : <AlertCircle size={14} />}
+                                  {notif.type === 'new' ? <Plus size={14} /> : 
+                                   notif.type === 'alert' ? <Bell size={14} /> :
+                                   <AlertCircle size={14} />}
                                 </div>
-                                <div>
-                                  <p className="text-sm font-bold text-zinc-900 leading-tight">{notif.title}</p>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-start justify-between gap-2">
+                                    <p className="text-sm font-bold text-zinc-900 leading-tight">{notif.title}</p>
+                                    <button 
+                                      onClick={() => {
+                                        const text = encodeURIComponent(`*${notif.title}*\n${notif.description}`);
+                                        window.open(`https://wa.me/?text=${text}`, '_blank');
+                                      }}
+                                      className="p-1 text-zinc-300 hover:text-emerald-500 transition-colors opacity-0 group-hover:opacity-100"
+                                      title="Enviar via WhatsApp"
+                                    >
+                                      <MessageCircle size={14} />
+                                    </button>
+                                  </div>
                                   <p className="text-xs text-zinc-500 mt-1 leading-relaxed">{notif.description}</p>
                                   <p className="text-[10px] text-zinc-400 mt-2 font-medium">
                                     {format(parseISO(notif.date), 'dd/MM/yyyy HH:mm')}
@@ -756,6 +814,8 @@ export default function App() {
               <input 
                 type="text" 
                 placeholder="Buscar..." 
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
                 className="pl-10 pr-4 py-2 bg-zinc-100 border-none rounded-full text-sm focus:ring-2 focus:ring-black/5 w-64"
               />
             </div>
@@ -763,12 +823,12 @@ export default function App() {
         </header>
 
         <div className="p-8 max-w-7xl mx-auto">
-          {activeTab === 'dashboard' && <Dashboard equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} allPlans={allPlans} />}
-          {activeTab === 'equipment' && <EquipmentSection equipment={equipment} user={user} initialEquipId={initialEquipId} onClearInitialId={() => setInitialEquipId(null)} />}
-          {activeTab === 'maintenance' && <MaintenanceSection equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} />}
-          {activeTab === 'parts' && <PartsSection equipment={equipment} user={user} />}
-          {activeTab === 'reports' && <ReportsSection equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} />}
-          {activeTab === 'users' && <UsersSection user={user} />}
+          {activeTab === 'dashboard' && <Dashboard equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} allPlans={allPlans} searchTerm={searchTerm} />}
+          {activeTab === 'equipment' && <EquipmentSection equipment={equipment} user={user} initialEquipId={initialEquipId} onClearInitialId={() => setInitialEquipId(null)} searchTerm={searchTerm} />}
+          {activeTab === 'maintenance' && <MaintenanceSection equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} searchTerm={searchTerm} />}
+          {activeTab === 'parts' && <PartsSection equipment={equipment} user={user} searchTerm={searchTerm} />}
+          {activeTab === 'reports' && <ReportsSection equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} searchTerm={searchTerm} />}
+          {activeTab === 'users' && <UsersSection user={user} searchTerm={searchTerm} />}
         </div>
       </main>
     </div>
@@ -793,7 +853,7 @@ function NavItem({ active, onClick, icon, label }: any) {
 
 // --- Sections ---
 
-function Dashboard({ equipment, records, user, onDeleteRecord, allPlans }: { equipment: Equipment[], records: MaintenanceRecord[], user: UserProfile, onDeleteRecord: (id: string) => void, allPlans: MaintenancePlan[] }) {
+function Dashboard({ equipment, records, user, onDeleteRecord, allPlans, searchTerm }: { equipment: Equipment[], records: MaintenanceRecord[], user: UserProfile, onDeleteRecord: (id: string) => void, allPlans: MaintenancePlan[], searchTerm: string }) {
   const activeMaintenances = records.filter(r => r.status === 'in-progress');
   
   // Calculate due maintenances
@@ -814,7 +874,10 @@ function Dashboard({ equipment, records, user, onDeleteRecord, allPlans }: { equ
         isDue: remainingHours <= plan.intervalHours * 0.1 || remainingHours <= 10
       };
     }).filter(d => d.isDue);
-  });
+  }).filter(d => 
+    d.equipName.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    d.planDescription.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
   const handleSendDueAlerts = async () => {
     if (dueMaintenances.length === 0) {
@@ -822,8 +885,8 @@ function Dashboard({ equipment, records, user, onDeleteRecord, allPlans }: { equ
       return;
     }
     
-    const alertMsg = `🚨 ALERTA DE VENCIMENTO\n\n${dueMaintenances.map(d => `• ${d.equipName}: ${d.planDescription} (${d.remainingHours.toFixed(1)}h restantes)`).join('\n')}`;
-    const sentCount = await sendAlert(alertMsg);
+    const alertMsg = `${dueMaintenances.map(d => `• ${d.equipName}: ${d.planDescription} (${d.remainingHours.toFixed(1)}h restantes)`).join('\n')}`;
+    const sentCount = await sendAlert(alertMsg, '🚨 ALERTA DE VENCIMENTO', 'alert');
     alert(`Alertas enviados para ${sentCount} usuários registrados.`);
   };
   
@@ -946,7 +1009,7 @@ function StatCard({ label, value, icon }: any) {
   );
 }
 
-function EquipmentSection({ equipment, user, initialEquipId, onClearInitialId }: { equipment: Equipment[], user: UserProfile, initialEquipId?: string | null, onClearInitialId?: () => void }) {
+function EquipmentSection({ equipment, user, initialEquipId, onClearInitialId, searchTerm }: { equipment: Equipment[], user: UserProfile, initialEquipId?: string | null, onClearInitialId?: () => void, searchTerm: string }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<Equipment | null>(null);
   const [viewingItem, setViewingItem] = useState<Equipment | null>(null);
@@ -958,6 +1021,12 @@ function EquipmentSection({ equipment, user, initialEquipId, onClearInitialId }:
   const [manualSource, setManualSource] = useState<'url' | 'file'>('url');
   const [photoBase64, setPhotoBase64] = useState<string>('');
   const [manualBase64, setManualBase64] = useState<string>('');
+
+  const filteredEquipment = equipment.filter(item => 
+    item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (item.model && item.model.toLowerCase().includes(searchTerm.toLowerCase())) ||
+    (item.serialNumber && item.serialNumber.toLowerCase().includes(searchTerm.toLowerCase()))
+  );
 
   useEffect(() => {
     if (initialEquipId && equipment.length > 0) {
@@ -1055,7 +1124,7 @@ function EquipmentSection({ equipment, user, initialEquipId, onClearInitialId }:
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {equipment.map(item => (
+        {filteredEquipment.map(item => (
           <Card key={item.id} className="group">
             <div className="h-48 bg-zinc-100 relative overflow-hidden">
               {item.photoUrl ? (
@@ -1397,7 +1466,7 @@ function EquipmentSection({ equipment, user, initialEquipId, onClearInitialId }:
               </div>
             </div>
             
-            <PartsList equipmentId={viewingItem.id} user={user} />
+            <PartsList equipmentId={viewingItem.id} user={user} searchTerm={searchTerm} />
             <PlansList equipment={viewingItem} user={user} />
           </div>
         )}
@@ -1406,7 +1475,7 @@ function EquipmentSection({ equipment, user, initialEquipId, onClearInitialId }:
   );
 }
 
-function PartsList({ equipmentId, user }: { equipmentId: string, user: UserProfile }) {
+function PartsList({ equipmentId, user, searchTerm }: { equipmentId: string, user: UserProfile, searchTerm: string }) {
   const [parts, setParts] = useState<Part[]>([]);
   const [isAdding, setIsAdding] = useState(false);
 
@@ -1416,6 +1485,11 @@ function PartsList({ equipmentId, user }: { equipmentId: string, user: UserProfi
       setParts(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Part)));
     });
   }, [equipmentId]);
+
+  const filteredParts = parts.filter(part => 
+    part.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    part.code.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
   const handleAddPart = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -1454,7 +1528,7 @@ function PartsList({ equipmentId, user }: { equipmentId: string, user: UserProfi
       )}
 
       <div className="space-y-2">
-        {parts.map(part => (
+        {filteredParts.map(part => (
           <div key={part.id} className="flex items-center justify-between p-3 bg-white border border-zinc-100 rounded-lg text-sm">
             <div>
               <p className="font-bold">{part.name}</p>
@@ -1659,7 +1733,7 @@ function PlansList({ equipment, user }: { equipment: Equipment, user: UserProfil
   );
 }
 
-function MaintenanceSection({ equipment, records, user, onDeleteRecord }: { equipment: Equipment[], records: MaintenanceRecord[], user: UserProfile, onDeleteRecord: (id: string) => void }) {
+function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTerm }: { equipment: Equipment[], records: MaintenanceRecord[], user: UserProfile, onDeleteRecord: (id: string) => void, searchTerm: string }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isCompleteModalOpen, setIsCompleteModalOpen] = useState(false);
@@ -1761,8 +1835,8 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord }: { equi
     await addDoc(collection(db, 'maintenance_records'), data);
     
     // Send Alert
-    const alertMsg = `⚠️ NOVA ORDEM DE SERVIÇO\nEquipamento: ${equip.name}\nPlano: ${plan.description}\nIniciada em: ${format(new Date(), 'dd/MM/yyyy HH:mm')}`;
-    await sendAlert(alertMsg);
+    const alertMsg = `Equipamento: ${equip.name}\nPlano: ${plan.description}\nIniciada em: ${format(new Date(), 'dd/MM/yyyy HH:mm')}`;
+    await sendAlert(alertMsg, '⚠️ NOVA ORDEM DE SERVIÇO', 'new');
 
     setIsModalOpen(false);
     setSelectedParts([]);
@@ -1857,8 +1931,12 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord }: { equi
   };
 
   const filteredRecords = records.filter(record => {
-    if (statusFilter === 'all') return true;
-    return record.status === statusFilter;
+    const matchesStatus = statusFilter === 'all' || record.status === statusFilter;
+    const matchesSearch = 
+      (record.equipmentName && record.equipmentName.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (record.planDescription && record.planDescription.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (record.notes && record.notes.toLowerCase().includes(searchTerm.toLowerCase()));
+    return matchesStatus && matchesSearch;
   });
 
   return (
@@ -2233,8 +2311,11 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord }: { equi
   );
 }
 
-function PartsSection({ equipment, user }: { equipment: Equipment[], user: UserProfile }) {
-  const [selectedEquipId, setSelectedEquipId] = useState(equipment[0]?.id || '');
+function PartsSection({ equipment, user, searchTerm }: { equipment: Equipment[], user: UserProfile, searchTerm: string }) {
+  const filteredEquipment = equipment.filter(item => 
+    item.name.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+  const [selectedEquipId, setSelectedEquipId] = useState(filteredEquipment[0]?.id || equipment[0]?.id || '');
 
   return (
     <div className="space-y-6">
@@ -2248,7 +2329,7 @@ function PartsSection({ equipment, user }: { equipment: Equipment[], user: UserP
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
         <div className="lg:col-span-1 space-y-2">
           <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-4">Equipamentos</h4>
-          {equipment.map(item => (
+          {filteredEquipment.map(item => (
             <button
               key={item.id}
               onClick={() => setSelectedEquipId(item.id)}
@@ -2266,7 +2347,7 @@ function PartsSection({ equipment, user }: { equipment: Equipment[], user: UserP
         <div className="lg:col-span-3">
           {selectedEquipId ? (
             <Card className="p-6">
-              <PartsList equipmentId={selectedEquipId} user={user} />
+              <PartsList equipmentId={selectedEquipId} user={user} searchTerm={searchTerm} />
             </Card>
           ) : (
             <div className="h-64 flex items-center justify-center border-2 border-dashed border-zinc-200 rounded-2xl text-zinc-400">
@@ -2279,7 +2360,7 @@ function PartsSection({ equipment, user }: { equipment: Equipment[], user: UserP
   );
 }
 
-function ReportsSection({ equipment, records, user, onDeleteRecord }: { equipment: Equipment[], records: MaintenanceRecord[], user: UserProfile, onDeleteRecord: (id: string) => void }) {
+function ReportsSection({ equipment, records, user, onDeleteRecord, searchTerm }: { equipment: Equipment[], records: MaintenanceRecord[], user: UserProfile, onDeleteRecord: (id: string) => void, searchTerm: string }) {
   const [filterDate, setFilterDate] = useState(format(new Date(), 'yyyy-MM'));
   const [selectedEquipId, setSelectedEquipId] = useState('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'planned' | 'in-progress' | 'completed'>('all');
@@ -2288,7 +2369,11 @@ function ReportsSection({ equipment, records, user, onDeleteRecord }: { equipmen
     const matchesDate = r.startDate.startsWith(filterDate);
     const matchesEquip = selectedEquipId === 'all' || r.equipmentId === selectedEquipId;
     const matchesStatus = statusFilter === 'all' || r.status === statusFilter;
-    return matchesDate && matchesEquip && matchesStatus;
+    const matchesSearch = 
+      (r.equipmentName && r.equipmentName.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (r.planDescription && r.planDescription.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (r.notes && r.notes.toLowerCase().includes(searchTerm.toLowerCase()));
+    return matchesDate && matchesEquip && matchesStatus && matchesSearch;
   });
   
   const totalCost = filteredRecords.reduce((acc, r) => acc + (r.totalPartsCost || 0) + (r.totalLaborCost || 0), 0);
@@ -2525,7 +2610,7 @@ function ReportsSection({ equipment, records, user, onDeleteRecord }: { equipmen
   );
 }
 
-function UsersSection({ user }: { user: UserProfile }) {
+function UsersSection({ user, searchTerm }: { user: UserProfile, searchTerm: string }) {
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -2535,6 +2620,12 @@ function UsersSection({ user }: { user: UserProfile }) {
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [showEditPassword, setShowEditPassword] = useState(false);
+
+  const filteredUsers = users.filter(u => 
+    u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    u.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (u.phoneNumber && u.phoneNumber.toLowerCase().includes(searchTerm.toLowerCase()))
+  );
 
   useEffect(() => {
     console.log('UsersSection mounted, setting up snapshot listener');
@@ -2812,7 +2903,7 @@ function UsersSection({ user }: { user: UserProfile }) {
       </Modal>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {users.map(u => (
+        {filteredUsers.map(u => (
           <Card key={u.uid} className="p-6">
             <div className="flex items-center gap-4 mb-4">
               <div className={`w-12 h-12 rounded-full flex items-center justify-center ${

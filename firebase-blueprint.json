@@ -87,6 +87,19 @@
         "notes": { "type": "string" }
       },
       "required": ["equipmentId", "status"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "System alerts and notifications",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "type": { "type": "string", "enum": ["new", "maintenance", "alert"] },
+        "date": { "type": "string", "format": "date-time" },
+        "readBy": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["title", "description", "type", "date"]
     }
   },
   "firestore": {
@@ -109,6 +122,10 @@
     "/maintenance_records/{recordId}": {
       "schema": "MaintenanceRecord",
       "description": "Maintenance execution records"
+    },
+    "/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "System notifications"
     }
   }
 }
