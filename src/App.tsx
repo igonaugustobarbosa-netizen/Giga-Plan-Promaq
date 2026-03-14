@@ -109,52 +109,6 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   return errInfo.error;
 }
 
-const sendAlert = async (message: string, title: string = 'Alerta de Sistema', type: 'new' | 'maintenance' | 'alert' = 'alert') => {
-  console.log(`[sendAlert] Starting... Title: ${title}, Type: ${type}`);
-  try {
-    // 1. Save to Firestore for in-app notifications
-    const notificationData = {
-      title,
-      description: message,
-      type,
-      date: new Date().toISOString(),
-      readBy: []
-    };
-    const docRef = await addDoc(collection(db, 'notifications'), notificationData);
-    console.log(`[sendAlert] Notification saved to Firestore. ID: ${docRef.id}`);
-
-    // 2. Simulate WhatsApp
-    console.log(`[sendAlert] Querying all users...`);
-    const snapshot = await getDocs(collection(db, 'users'));
-    const allUsers = snapshot.docs.map(d => d.data() as UserProfile);
-    const users = allUsers.filter(u => u.receiveAlerts === true);
-    console.log(`[sendAlert] Found ${users.length} users with alerts enabled.`);
-    
-    users.forEach(u => {
-      console.log(`[sendAlert] Checking user: ${u.name}, Phone: ${u.phoneNumber}`);
-      if (u.phoneNumber) {
-        const cleanPhone = u.phoneNumber.replace(/\D/g, '');
-        if (cleanPhone) {
-          console.log(`[ALERT SENT TO ${u.name} (${cleanPhone})]: ${message}`);
-          
-          // Browser notification if permitted
-          if ("Notification" in window && Notification.permission === "granted") {
-            new Notification(title, { body: message });
-          }
-        } else {
-          console.warn(`[sendAlert] User ${u.name} has invalid phone number: ${u.phoneNumber}`);
-        }
-      } else {
-        console.warn(`[sendAlert] User ${u.name} has no phone number.`);
-      }
-    });
-    return users.length;
-  } catch (error) {
-    console.error('[sendAlert] Error sending alerts:', error);
-    return 0;
-  }
-};
-
 // --- Components ---
 
 const Toast = ({ message, type, onClose }: { message: string, type: 'success' | 'error' | 'info', onClose: () => void }) => (
@@ -273,6 +227,18 @@ const Modal = ({ isOpen, onClose, title, children }: any) => (
   </AnimatePresence>
 );
 
+const ConfirmModal = ({ isOpen, onClose, onConfirm, title, message, confirmText = 'Excluir', cancelText = 'Cancelar', variant = 'danger' }: any) => (
+  <Modal isOpen={isOpen} onClose={onClose} title={title}>
+    <div className="space-y-6">
+      <p className="text-zinc-600 font-medium">{message}</p>
+      <div className="flex justify-end gap-3">
+        <Button variant="outline" onClick={onClose}>{cancelText}</Button>
+        <Button variant={variant} onClick={() => { onConfirm(); onClose(); }}>{confirmText}</Button>
+      </div>
+    </div>
+  </Modal>
+);
+
 // --- Main App ---
 
 export default function App() {
@@ -297,10 +263,78 @@ export default function App() {
   const [firestoreNotifications, setFirestoreNotifications] = useState<AppNotification[]>([]);
   const [initialEquipId, setInitialEquipId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' | 'info' } | null>(null);
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+    confirmText?: string;
+    variant?: 'primary' | 'danger';
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: () => {},
+  });
 
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 5000);
+  };
+
+  const sendAlert = async (message: string, title: string = 'Alerta de Sistema', type: 'new' | 'maintenance' | 'alert' = 'alert', customId?: string) => {
+    console.log(`[sendAlert] Starting... Title: ${title}, Type: ${type}, CustomID: ${customId}`);
+    try {
+      // 1. Save to Firestore for in-app notifications
+      const notificationData = {
+        title,
+        description: message,
+        type,
+        date: new Date().toISOString(),
+        readBy: []
+      };
+      
+      if (customId) {
+        await setDoc(doc(db, 'notifications', customId), notificationData);
+        console.log(`[sendAlert] Notification saved to Firestore with ID: ${customId}`);
+      } else {
+        const docRef = await addDoc(collection(db, 'notifications'), notificationData);
+        console.log(`[sendAlert] Notification saved to Firestore. ID: ${docRef.id}`);
+      }
+
+      // Trigger local notification for the sender immediately if permitted
+      if ("Notification" in window && Notification.permission === "granted") {
+        try {
+          new Notification(title, { body: message });
+        } catch (e) {
+          console.error("[sendAlert] Local notification failed:", e);
+        }
+      }
+
+      // 2. Simulate WhatsApp
+      console.log(`[sendAlert] Querying all users...`);
+      const snapshot = await getDocs(collection(db, 'users'));
+      const allUsers = snapshot.docs.map(d => d.data() as UserProfile);
+      const users = allUsers.filter(u => u.receiveAlerts === true);
+      console.log(`[sendAlert] Found ${users.length} users with alerts enabled.`);
+      
+      users.forEach(u => {
+        console.log(`[sendAlert] Checking user: ${u.name}, Phone: ${u.phoneNumber}`);
+        if (u.phoneNumber) {
+          const cleanPhone = u.phoneNumber.replace(/\D/g, '');
+          if (cleanPhone) {
+            console.log(`[ALERT SENT TO ${u.name} (${cleanPhone})]: ${message}`);
+          }
+        }
+      });
+      
+      showToast(`${title} - Notificação enviada com sucesso.`, 'success');
+      return users.length;
+    } catch (error) {
+      console.error('[sendAlert] Error sending alerts:', error);
+      showToast('Erro ao enviar notificação', 'error');
+      return 0;
+    }
   };
 
   // Auth Form States
@@ -330,10 +364,12 @@ export default function App() {
             uid: firebaseUser.uid,
             username: firebaseUser.email || '',
             name: firebaseUser.displayName || 'Usuário',
-            role: firebaseUser.email === 'igonaugustobarbosa@gmail.com' ? 'admin' : 'operator'
+            role: firebaseUser.email === 'igonaugustobarbosa@gmail.com' ? 'admin' : 'operator',
+            receiveAlerts: true
           };
           try {
             await setDoc(doc(db, 'users', firebaseUser.uid), newUser);
+            await sendAlert(`Novo usuário cadastrado via Google: ${newUser.name} (${newUser.username})`, '👤 NOVO USUÁRIO', 'new');
             setUser(newUser);
             localStorage.setItem('giga_plan_user', JSON.stringify(newUser));
           } catch (err) {
@@ -457,11 +493,40 @@ export default function App() {
 
       return onSnapshot(q, (snapshot) => {
         console.log(`Firestore notifications received (orderBy: ${useOrderBy}). Count:`, snapshot.size);
-        let docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as AppNotification));
-        if (!useOrderBy) {
-          docs = docs.sort((a, b) => parseISO(b.date).getTime() - parseISO(a.date).getTime());
+        const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as AppNotification));
+
+        // Trigger browser notification for NEW notifications only (not initial load)
+        if (!snapshot.metadata.fromCache && snapshot.docChanges().length > 0) {
+          snapshot.docChanges().forEach((change) => {
+            if (change.type === "added") {
+              const data = change.doc.data() as AppNotification;
+              const msgDate = parseISO(data.date);
+              const now = new Date();
+              // Only notify if the message is very recent (last 30 seconds)
+              if (now.getTime() - msgDate.getTime() < 30000) {
+                // Show in-app toast
+                showToast(`Nova Notificação: ${data.title}`, 'info');
+
+                if ("Notification" in window && Notification.permission === "granted") {
+                  try {
+                    new Notification(data.title, { 
+                      body: data.description,
+                      icon: '/favicon.ico'
+                    });
+                  } catch (e) {
+                    console.error("Error showing browser notification:", e);
+                  }
+                }
+              }
+            }
+          });
         }
-        setFirestoreNotifications(docs);
+
+        if (!useOrderBy) {
+          setFirestoreNotifications(docs.sort((a, b) => parseISO(b.date).getTime() - parseISO(a.date).getTime()));
+        } else {
+          setFirestoreNotifications(docs);
+        }
       }, (error) => {
         console.error('Error fetching notifications:', error);
         if (useOrderBy && error.message.includes('index')) {
@@ -475,74 +540,114 @@ export default function App() {
     return () => { if (unsub) unsub(); };
   }, [user]);
 
+  // Browser notification permission logic removed as per user request
+  
   // Calculate local derived notifications and merge with Firestore
   useEffect(() => {
     if (!user) return;
 
-    const localNotifications: any[] = [];
-    const now = new Date();
+    const calculateNotifications = async () => {
+      const localNotifications: any[] = [];
+      const now = new Date();
 
-    // 1. New Equipment (last 3 days)
-    equipment.forEach(equip => {
-      const createdDate = equip.createdAt ? parseISO(equip.createdAt) : null;
-      if (createdDate && differenceInDays(now, createdDate) <= 3) {
-        localNotifications.push({
-          id: `new-equip-${equip.id}`,
-          title: 'Novo Equipamento',
-          description: `${equip.name} foi cadastrado recentemente.`,
-          type: 'new',
-          date: equip.createdAt
-        });
-      }
-    });
-
-    // 2. Upcoming Maintenance
-    allPlans.forEach(plan => {
-      const equip = equipment.find(e => e.id === plan.equipmentId);
-      if (!equip) return;
-
-      const planRecords = maintenanceRecords.filter(r => r.planId === plan.id && r.status === 'completed');
-      const lastRecord = planRecords.sort((a, b) => parseISO(b.startDate).getTime() - parseISO(a.startDate).getTime())[0];
-
-      const lastHourMeter = lastRecord?.hourMeter || 0;
-      const nextMaintenanceHour = lastHourMeter + plan.intervalHours;
-      const remainingHours = nextMaintenanceHour - (equip.currentHours || 0);
-      
-      if (equip.avgHoursPerDay && equip.avgHoursPerDay > 0) {
-        const days = Math.ceil(remainingHours / equip.avgHoursPerDay);
-        if (days >= 0 && days <= 7) {
+      // 1. New Equipment (last 3 days)
+      equipment.forEach(equip => {
+        const createdDate = equip.createdAt ? parseISO(equip.createdAt) : null;
+        if (createdDate && differenceInDays(now, createdDate) <= 3) {
           localNotifications.push({
-            id: `maint-${plan.id}`,
-            title: 'Manutenção Próxima',
-            description: `${equip.name} (Mod: ${equip.model}, S/N: ${equip.serialNumber}): ${plan.description} em aprox. ${days} dias.`,
-            type: 'maintenance',
-            date: new Date().toISOString()
-          });
-        } else if (days < 0) {
-          localNotifications.push({
-            id: `maint-overdue-${plan.id}`,
-            title: 'Manutenção Atrasada',
-            description: `${equip.name} (Mod: ${equip.model}, S/N: ${equip.serialNumber}): ${plan.description} está atrasada!`,
-            type: 'maintenance',
-            date: new Date().toISOString()
+            id: `local-new-equip-${equip.id}`,
+            title: 'Novo Equipamento',
+            description: `${equip.name} foi cadastrado recentemente.`,
+            type: 'new',
+            date: equip.createdAt
           });
         }
-      }
-    });
+      });
 
-    console.log('Local notifications calculated:', localNotifications.length);
+      // 2. Upcoming Maintenance & Overdue
+      // Use for...of to handle async sendAlert calls correctly
+      for (const plan of allPlans) {
+        const equip = equipment.find(e => e.id === plan.equipmentId);
+        if (!equip) continue;
 
-    // Merge and sort
-    const combined = [...firestoreNotifications, ...localNotifications];
-    const sorted = combined.sort((a, b) => {
-      try {
-        return parseISO(b.date).getTime() - parseISO(a.date).getTime();
-      } catch (e) {
-        return 0;
+        const planRecords = maintenanceRecords.filter(r => r.planId === plan.id && r.status === 'completed');
+        const lastRecord = planRecords.sort((a, b) => parseISO(b.startDate).getTime() - parseISO(a.startDate).getTime())[0];
+
+        const lastHourMeter = lastRecord?.hourMeter || 0;
+        const nextMaintenanceHour = lastHourMeter + plan.intervalHours;
+        const remainingHours = nextMaintenanceHour - (equip.currentHours || 0);
+        
+        if (equip.avgHoursPerDay && equip.avgHoursPerDay > 0) {
+          const days = Math.ceil(remainingHours / equip.avgHoursPerDay);
+          
+          // Deterministic ID for this specific maintenance cycle
+          const cycleId = `maint-${equip.id}-${plan.id}-${nextMaintenanceHour}`;
+
+          if (days >= 0 && days <= 7) {
+            // Local notification
+            localNotifications.push({
+              id: `local-${cycleId}`,
+              title: 'Manutenção Próxima',
+              description: `${equip.name} (Mod: ${equip.model}, S/N: ${equip.serialNumber}): ${plan.description} em aprox. ${days} dias.`,
+              type: 'maintenance',
+              date: new Date().toISOString()
+            });
+
+            // Trigger persistent alert if not already sent (only for admins/supervisors)
+            if (user.role !== 'operator') {
+              const alreadySent = firestoreNotifications.some(n => n.id === cycleId);
+              if (!alreadySent) {
+                await sendAlert(
+                  `${equip.name} (${equip.model}): ${plan.description} está próxima (aprox. ${days} dias).`,
+                  '⚠️ MANUTENÇÃO PRÓXIMA',
+                  'maintenance',
+                  cycleId
+                );
+              }
+            }
+          } else if (days < 0) {
+            const overdueId = `overdue-${cycleId}`;
+            localNotifications.push({
+              id: `local-${overdueId}`,
+              title: 'Manutenção Atrasada',
+              description: `${equip.name} (Mod: ${equip.model}, S/N: ${equip.serialNumber}): ${plan.description} está atrasada!`,
+              type: 'maintenance',
+              date: new Date().toISOString()
+            });
+
+            if (user.role !== 'operator') {
+              const alreadySent = firestoreNotifications.some(n => n.id === overdueId);
+              if (!alreadySent) {
+                await sendAlert(
+                  `${equip.name} (${equip.model}): ${plan.description} ESTÁ ATRASADA!`,
+                  '🚨 MANUTENÇÃO ATRASADA',
+                  'alert',
+                  overdueId
+                );
+              }
+            }
+          }
+        }
       }
-    });
-    console.log('Final merged notifications count:', sorted.length);
-    setNotifications(sorted);
+
+      // Merge and sort
+      const filteredLocal = localNotifications.filter(ln => 
+        !firestoreNotifications.some(fn => fn.id === ln.id.replace('local-', ''))
+      );
+
+      const combined = [...firestoreNotifications, ...filteredLocal];
+      const sorted = combined.sort((a, b) => {
+        try {
+          return parseISO(b.date).getTime() - parseISO(a.date).getTime();
+        } catch (e) {
+          return 0;
+        }
+      });
+      console.log('Final notifications list updated. Count:', sorted.length);
+      setNotifications(sorted);
+    };
+
+    calculateNotifications();
   }, [equipment, allPlans, maintenanceRecords, firestoreNotifications, user]);
 
   const handleGoogleLogin = async () => {
@@ -560,13 +665,23 @@ export default function App() {
   };
 
   const handleDeleteMaintenance = async (id: string) => {
-    if (confirm('Tem certeza que deseja excluir este registro de manutenção?')) {
-      try {
-        await deleteDoc(doc(db, 'maintenance_records', id));
-      } catch (err: any) {
-        handleFirestoreError(err, OperationType.DELETE, 'maintenance_records');
+    setConfirmModal({
+      isOpen: true,
+      title: 'Excluir Registro',
+      message: 'Tem certeza que deseja excluir este registro de manutenção?',
+      onConfirm: async () => {
+        try {
+          const record = maintenanceRecords.find(r => r.id === id);
+          await deleteDoc(doc(db, 'maintenance_records', id));
+          if (record) {
+            await sendAlert(`Registro de manutenção excluído: ${record.equipmentName} - ${record.planDescription}`, '🗑️ MANUTENÇÃO EXCLUÍDA', 'alert');
+          }
+          showToast('Registro excluído com sucesso.', 'success');
+        } catch (err: any) {
+          handleFirestoreError(err, OperationType.DELETE, 'maintenance_records');
+        }
       }
-    }
+    });
   };
 
   const handleTestLogin = (role: UserRole) => {
@@ -831,29 +946,6 @@ export default function App() {
             <h2 className="text-lg font-bold text-zinc-900 capitalize">{activeTab}</h2>
           </div>
           <div className="flex items-center gap-4">
-            <button 
-              onClick={async () => {
-                if (!("Notification" in window)) {
-                  showToast("Este navegador não suporta notificações desktop.", "error");
-                  return;
-                }
-                try {
-                  const permission = await Notification.requestPermission();
-                  if (permission === "granted") {
-                    showToast("Notificações do navegador ativadas!", "success");
-                  } else {
-                    showToast("Permissão de notificação negada.", "error");
-                  }
-                } catch (err) {
-                  console.error("Error requesting notification permission:", err);
-                  showToast("Erro ao solicitar permissão.", "error");
-                }
-              }}
-              className="p-2 text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 rounded-full transition-all"
-              title="Ativar Notificações do Navegador"
-            >
-              <Bell size={20} />
-            </button>
             <div className="relative">
               <button 
                 onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
@@ -876,25 +968,17 @@ export default function App() {
                       initial={{ opacity: 0, y: 10, scale: 0.95 }}
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                      className="absolute right-0 mt-2 w-80 bg-white rounded-2xl shadow-2xl border border-zinc-100 z-30 overflow-hidden"
+                      className="absolute right-0 mt-2 w-80 bg-white/95 backdrop-blur-md rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.15)] border border-white/20 z-30 overflow-hidden"
                     >
-                      <div className="p-4 border-b border-zinc-100 flex items-center justify-between bg-zinc-50/50">
+                      <div className="p-4 border-b border-zinc-100 flex items-center justify-between bg-zinc-50/80">
                         <h3 className="text-xs font-bold text-zinc-900 uppercase tracking-widest">Notificações</h3>
                         <div className="flex items-center gap-2">
-                          {("Notification" in window && Notification.permission !== "granted") && (
+                          {"Notification" in window && Notification.permission !== "granted" && (
                             <button 
-                              onClick={async () => {
-                                try {
-                                  const permission = await Notification.requestPermission();
-                                  if (permission === "granted") showToast("Ativado!", "success");
-                                  else showToast("Negado", "error");
-                                } catch (err) {
-                                  showToast("Erro", "error");
-                                }
-                              }}
+                              onClick={() => Notification.requestPermission()}
                               className="text-[10px] font-bold text-blue-600 hover:underline"
                             >
-                              Ativar Desktop
+                              Ativar Browser
                             </button>
                           )}
                           <span className="text-[10px] font-bold px-2 py-0.5 bg-zinc-200 text-zinc-600 rounded-full">
@@ -966,11 +1050,11 @@ export default function App() {
 
         <div className="p-8 max-w-7xl mx-auto">
           {activeTab === 'dashboard' && <Dashboard equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} allPlans={allPlans} searchTerm={searchTerm} showToast={showToast} />}
-          {activeTab === 'equipment' && <EquipmentSection equipment={equipment} user={user} initialEquipId={initialEquipId} onClearInitialId={() => setInitialEquipId(null)} searchTerm={searchTerm} />}
-          {activeTab === 'maintenance' && <MaintenanceSection equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} searchTerm={searchTerm} />}
-          {activeTab === 'parts' && <PartsSection equipment={equipment} user={user} searchTerm={searchTerm} />}
+          {activeTab === 'equipment' && <EquipmentSection equipment={equipment} user={user} initialEquipId={initialEquipId} onClearInitialId={() => setInitialEquipId(null)} searchTerm={searchTerm} showToast={showToast} setConfirmModal={setConfirmModal} sendAlert={sendAlert} />}
+          {activeTab === 'maintenance' && <MaintenanceSection equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} searchTerm={searchTerm} sendAlert={sendAlert} />}
+          {activeTab === 'parts' && <PartsSection equipment={equipment} user={user} searchTerm={searchTerm} sendAlert={sendAlert} />}
           {activeTab === 'reports' && <ReportsSection equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} searchTerm={searchTerm} />}
-          {activeTab === 'users' && <UsersSection user={user} searchTerm={searchTerm} />}
+          {activeTab === 'users' && <UsersSection user={user} searchTerm={searchTerm} showToast={showToast} setConfirmModal={setConfirmModal} sendAlert={sendAlert} />}
         </div>
 
         <AnimatePresence>
@@ -982,6 +1066,16 @@ export default function App() {
             />
           )}
         </AnimatePresence>
+
+        <ConfirmModal
+          isOpen={confirmModal.isOpen}
+          title={confirmModal.title}
+          message={confirmModal.message}
+          onConfirm={confirmModal.onConfirm}
+          onClose={() => setConfirmModal({ ...confirmModal, isOpen: false })}
+          confirmText={confirmModal.confirmText}
+          variant={confirmModal.variant}
+        />
       </main>
     </div>
   );
@@ -1007,7 +1101,6 @@ function NavItem({ active, onClick, icon, label }: any) {
 
 function Dashboard({ equipment, records, user, onDeleteRecord, allPlans, searchTerm, showToast }: { equipment: Equipment[], records: MaintenanceRecord[], user: UserProfile, onDeleteRecord: (id: string) => void, allPlans: MaintenancePlan[], searchTerm: string, showToast: (m: string, t?: any) => void }) {
   const activeMaintenances = records.filter(r => r.status === 'in-progress');
-  const [isSending, setIsSending] = useState(false);
   
   // Calculate due maintenances
   const dueMaintenances = equipment.flatMap(equip => {
@@ -1019,6 +1112,16 @@ function Dashboard({ equipment, records, user, onDeleteRecord, allPlans, searchT
       const nextMaintenanceHour = lastHourMeter + plan.intervalHours;
       const remainingHours = nextMaintenanceHour - (equip.currentHours || 0);
       
+      let isDue = false;
+      let daysRemaining = null;
+
+      if (equip.avgHoursPerDay && equip.avgHoursPerDay > 0) {
+        daysRemaining = Math.ceil(remainingHours / equip.avgHoursPerDay);
+        isDue = daysRemaining <= 7;
+      } else {
+        isDue = remainingHours <= plan.intervalHours * 0.1 || remainingHours <= 10;
+      }
+      
       return {
         equip,
         equipName: equip.name,
@@ -1026,34 +1129,14 @@ function Dashboard({ equipment, records, user, onDeleteRecord, allPlans, searchT
         equipSerial: equip.serialNumber,
         planDescription: plan.description,
         remainingHours,
-        isDue: remainingHours <= plan.intervalHours * 0.1 || remainingHours <= 10
+        daysRemaining,
+        isDue
       };
     }).filter(d => d.isDue);
   }).filter(d => 
     d.equipName.toLowerCase().includes(searchTerm.toLowerCase()) || 
     d.planDescription.toLowerCase().includes(searchTerm.toLowerCase())
   );
-
-  const handleSendDueAlerts = async () => {
-    if (dueMaintenances.length === 0) {
-      showToast('Não há manutenções próximas do vencimento no momento.', 'info');
-      return;
-    }
-    
-    setIsSending(true);
-    try {
-      const alertMsg = dueMaintenances.map(d => 
-        `• ${d.equipName} (Mod: ${d.equipModel}, S/N: ${d.equipSerial})\n  Plano: ${d.planDescription}\n  Restante: ${d.remainingHours.toFixed(1)}h`
-      ).join('\n\n');
-      
-      const sentCount = await sendAlert(alertMsg, '🚨 ALERTA DE VENCIMENTO', 'alert');
-      showToast(`Alertas enviados para ${sentCount} usuários registrados.`, 'success');
-    } catch (err) {
-      showToast('Erro ao enviar alertas.', 'error');
-    } finally {
-      setIsSending(false);
-    }
-  };
   
   return (
     <div className="space-y-8">
@@ -1065,36 +1148,20 @@ function Dashboard({ equipment, records, user, onDeleteRecord, allPlans, searchT
 
       {dueMaintenances.length > 0 && (
         <Card className="p-6 border-red-100 bg-red-50/30">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2 text-red-600">
-              <AlertCircle size={20} />
-              <h3 className="font-bold">Atenção: Vencimentos Próximos</h3>
-            </div>
-            <Button variant="danger" size="sm" onClick={handleSendDueAlerts} loading={isSending}>
-              <Bell size={14} /> Notificar Responsáveis
-            </Button>
-            {user.role === 'admin' && (
-              <Button variant="outline" size="sm" loading={isSending} onClick={async () => {
-                setIsSending(true);
-                try {
-                  const count = await sendAlert('Este é um alerta de teste do sistema GIGA Plan.', '🧪 TESTE DE ALERTA', 'alert');
-                  showToast(`Teste concluído. Alerta enviado para ${count} usuários.`, 'success');
-                } catch (err) {
-                  showToast('Erro no teste de alerta.', 'error');
-                } finally {
-                  setIsSending(false);
-                }
-              }}>
-                Testar Alertas
-              </Button>
-            )}
+          <div className="flex items-center gap-2 text-red-600 mb-4">
+            <AlertCircle size={20} />
+            <h3 className="font-bold">Atenção: Vencimentos Próximos</h3>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {dueMaintenances.map((d, i) => (
               <div key={i} className="p-3 bg-white rounded-lg border border-red-100 shadow-sm">
                 <p className="font-bold text-zinc-900 text-sm">{d.equipName}</p>
                 <p className="text-xs text-zinc-500">{d.planDescription}</p>
-                <p className="text-xs font-bold text-red-600 mt-1">{d.remainingHours.toFixed(1)}h para o limite</p>
+                <p className="text-xs font-bold text-red-600 mt-1">
+                  {d.daysRemaining !== null 
+                    ? `${d.daysRemaining <= 0 ? 'ATRASADA' : `Vence em ~${d.daysRemaining} dias`}` 
+                    : `${d.remainingHours.toFixed(1)}h para o limite`}
+                </p>
               </div>
             ))}
           </div>
@@ -1110,14 +1177,14 @@ function Dashboard({ equipment, records, user, onDeleteRecord, allPlans, searchT
           <div className="space-y-4">
             {activeMaintenances.length > 0 ? activeMaintenances.map(record => (
               <div key={record.id} className="flex items-center gap-4 p-4 rounded-xl bg-orange-50 border border-orange-100">
-                <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center">
+                <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center shrink-0">
                   <Clock className="text-orange-600" size={20} />
                 </div>
-                <div className="flex-1">
-                  <p className="font-bold text-zinc-900">{record.equipmentName}</p>
-                  <p className="text-xs text-orange-600 font-medium">{record.planDescription}</p>
+                <div className="flex-1 min-w-0">
+                  <p className="font-bold text-zinc-900 truncate">{record.equipmentName}</p>
+                  <p className="text-xs text-orange-600 font-medium truncate">{record.planDescription}</p>
                 </div>
-                <div className="text-right flex items-center gap-3">
+                <div className="text-right flex items-center gap-3 shrink-0">
                   <div className="flex gap-4">
                     <div className="text-right">
                       <p className="text-[10px] font-bold text-zinc-400 uppercase">Programado</p>
@@ -1189,7 +1256,7 @@ function StatCard({ label, value, icon }: any) {
   );
 }
 
-function EquipmentSection({ equipment, user, initialEquipId, onClearInitialId, searchTerm }: { equipment: Equipment[], user: UserProfile, initialEquipId?: string | null, onClearInitialId?: () => void, searchTerm: string }) {
+function EquipmentSection({ equipment, user, initialEquipId, onClearInitialId, searchTerm, showToast, setConfirmModal, sendAlert }: { equipment: Equipment[], user: UserProfile, initialEquipId?: string | null, onClearInitialId?: () => void, searchTerm: string, showToast: (m: string, t?: any) => void, setConfirmModal: any, sendAlert: any }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<Equipment | null>(null);
   const [viewingItem, setViewingItem] = useState<Equipment | null>(null);
@@ -1234,7 +1301,7 @@ function EquipmentSection({ equipment, user, initialEquipId, onClearInitialId, s
     const file = e.target.files?.[0];
     if (file) {
       if (file.size > 800000) {
-        alert("Arquivo muito grande. O limite é de aproximadamente 800KB.");
+        showToast("Arquivo muito grande. O limite é de aproximadamente 800KB.", "error");
         e.target.value = '';
         return;
       }
@@ -1267,8 +1334,10 @@ function EquipmentSection({ equipment, user, initialEquipId, onClearInitialId, s
     try {
       if (editingItem) {
         await updateDoc(doc(db, 'equipment', editingItem.id), data);
+        await sendAlert(`Equipamento atualizado: ${data.name}`, '📦 EQUIPAMENTO ATUALIZADO', 'new');
       } else {
         await addDoc(collection(db, 'equipment'), data);
+        await sendAlert(`Novo equipamento cadastrado: ${data.name}`, '📦 NOVO EQUIPAMENTO', 'new');
       }
       setIsModalOpen(false);
       setEditingItem(null);
@@ -1281,12 +1350,24 @@ function EquipmentSection({ equipment, user, initialEquipId, onClearInitialId, s
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Tem certeza que deseja excluir este equipamento?')) return;
-    try {
-      await deleteDoc(doc(db, 'equipment', id));
-    } catch (error) {
-      console.error('Error deleting equipment:', error);
-    }
+    setConfirmModal({
+      isOpen: true,
+      title: 'Excluir Equipamento',
+      message: 'Tem certeza que deseja excluir este equipamento?',
+      onConfirm: async () => {
+        try {
+          const equip = equipment.find(e => e.id === id);
+          await deleteDoc(doc(db, 'equipment', id));
+          if (equip) {
+            await sendAlert(`Equipamento excluído: ${equip.name}`, '🗑️ EQUIPAMENTO EXCLUÍDO', 'alert');
+          }
+          showToast('Equipamento excluído com sucesso.', 'success');
+        } catch (error) {
+          console.error('Error deleting equipment:', error);
+          showToast('Erro ao excluir equipamento.', 'error');
+        }
+      }
+    });
   };
 
   return (
@@ -1355,12 +1436,12 @@ function EquipmentSection({ equipment, user, initialEquipId, onClearInitialId, s
                 <span className="px-2 py-1 bg-zinc-100 text-zinc-500 text-[10px] font-bold rounded uppercase tracking-wider">{item.model}</span>
               </div>
               <p className="text-sm text-zinc-500 mb-4 line-clamp-2">{item.technicalInfo || 'Sem informações técnicas cadastradas.'}</p>
-              <div className="flex items-center justify-between pt-4 border-t border-zinc-100">
-                <div className="flex items-center gap-2 text-zinc-400">
-                  <Package size={14} />
-                  <span className="text-xs font-medium">S/N: {item.serialNumber}</span>
+              <div className="flex items-center justify-between pt-4 border-t border-zinc-100 gap-4">
+                <div className="flex items-center gap-2 text-zinc-400 min-w-0">
+                  <Package size={14} className="shrink-0" />
+                  <span className="text-xs font-medium truncate">S/N: {item.serialNumber}</span>
                 </div>
-                <div className="flex items-center gap-2 text-zinc-400">
+                <div className="flex items-center gap-2 text-zinc-400 shrink-0">
                   <Clock size={14} />
                   <span className="text-xs font-medium">{item.currentHours || 0}h</span>
                 </div>
@@ -1646,8 +1727,8 @@ function EquipmentSection({ equipment, user, initialEquipId, onClearInitialId, s
               </div>
             </div>
             
-            <PartsList equipmentId={viewingItem.id} user={user} searchTerm={searchTerm} />
-            <PlansList equipment={viewingItem} user={user} />
+            <PartsList equipmentId={viewingItem.id} equipmentName={viewingItem.name} user={user} searchTerm={searchTerm} sendAlert={sendAlert} />
+            <PlansList equipment={viewingItem} user={user} showToast={showToast} setConfirmModal={setConfirmModal} sendAlert={sendAlert} />
           </div>
         )}
       </Modal>
@@ -1655,7 +1736,7 @@ function EquipmentSection({ equipment, user, initialEquipId, onClearInitialId, s
   );
 }
 
-function PartsList({ equipmentId, user, searchTerm }: { equipmentId: string, user: UserProfile, searchTerm: string }) {
+function PartsList({ equipmentId, equipmentName, user, searchTerm, sendAlert }: { equipmentId: string, equipmentName: string, user: UserProfile, searchTerm: string, sendAlert: any }) {
   const [parts, setParts] = useState<Part[]>([]);
   const [isAdding, setIsAdding] = useState(false);
 
@@ -1681,6 +1762,7 @@ function PartsList({ equipmentId, user, searchTerm }: { equipmentId: string, use
       cost: Number(formData.get('cost'))
     };
     await addDoc(collection(db, 'equipment', equipmentId, 'parts'), data);
+    await sendAlert(`Nova peça cadastrada para ${equipmentName}: ${data.name}`, '🔧 NOVA PEÇA', 'new');
     setIsAdding(false);
   };
 
@@ -1728,7 +1810,7 @@ function PartsList({ equipmentId, user, searchTerm }: { equipmentId: string, use
   );
 }
 
-function PlansList({ equipment, user }: { equipment: Equipment, user: UserProfile }) {
+function PlansList({ equipment, user, showToast, setConfirmModal, sendAlert }: { equipment: Equipment, user: UserProfile, showToast: (m: string, t?: any) => void, setConfirmModal: any, sendAlert: any }) {
   const equipmentId = equipment.id;
   const [plans, setPlans] = useState<MaintenancePlan[]>([]);
   const [parts, setParts] = useState<Part[]>([]);
@@ -1792,11 +1874,12 @@ function PlansList({ equipment, user }: { equipment: Equipment, user: UserProfil
     };
     try {
       await addDoc(collection(db, 'equipment', equipmentId, 'plans'), data);
+      await sendAlert(`Novo plano de manutenção para ${equipment.name}: ${data.description}`, '📋 NOVO PLANO', 'new');
       setIsAdding(false);
       setSelectedParts([]);
     } catch (error) {
       console.error("Erro ao adicionar plano:", error);
-      alert("Erro ao salvar o plano. Verifique os campos e tente novamente.");
+      showToast("Erro ao salvar o plano. Verifique os campos e tente novamente.", "error");
     }
   };
 
@@ -1861,12 +1944,12 @@ function PlansList({ equipment, user }: { equipment: Equipment, user: UserProfil
         {plans.length > 0 ? plans.map(plan => (
           <div key={plan.id} className="p-4 bg-zinc-50 rounded-xl border border-zinc-100">
             <div className="flex justify-between items-start mb-2">
-              <div>
-                <p className="font-bold text-zinc-900">{plan.description}</p>
+              <div className="flex-1 min-w-0">
+                <p className="font-bold text-zinc-900 truncate">{plan.description}</p>
                 <div className="flex items-center gap-3">
-                  <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">Intervalo: {plan.intervalHours}h</p>
+                  <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest shrink-0">Intervalo: {plan.intervalHours}h</p>
                   {calculateDaysRemaining(plan) !== null && (
-                    <p className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full border ${
+                    <p className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full border truncate ${
                       (calculateDaysRemaining(plan) || 0) <= 7 ? 'text-red-600 bg-red-50 border-red-100' : 
                       (calculateDaysRemaining(plan) || 0) <= 15 ? 'text-orange-600 bg-orange-50 border-orange-100' : 
                       'text-emerald-600 bg-emerald-50 border-emerald-100'
@@ -1878,9 +1961,23 @@ function PlansList({ equipment, user }: { equipment: Equipment, user: UserProfil
               </div>
               <button 
                 onClick={async () => {
-                  if(confirm('Deseja excluir este plano?')) {
-                    await deleteDoc(doc(db, 'equipment', equipmentId, 'plans', plan.id));
-                  }
+                  setConfirmModal({
+                    isOpen: true,
+                    title: 'Excluir Plano',
+                    message: 'Deseja excluir este plano?',
+                    onConfirm: async () => {
+                      try {
+                        const planToDelete = plans.find(p => p.id === plan.id);
+                        await deleteDoc(doc(db, 'equipment', equipmentId, 'plans', plan.id));
+                        if (planToDelete) {
+                          await sendAlert(`Plano de manutenção excluído de ${equipment.name}: ${planToDelete.description}`, '🗑️ PLANO EXCLUÍDO', 'alert');
+                        }
+                        showToast('Plano excluído com sucesso.', 'success');
+                      } catch (err) {
+                        showToast('Erro ao excluir plano.', 'error');
+                      }
+                    }
+                  });
                 }}
                 className="text-zinc-300 hover:text-red-500 transition-colors"
               >
@@ -1913,7 +2010,7 @@ function PlansList({ equipment, user }: { equipment: Equipment, user: UserProfil
   );
 }
 
-function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTerm }: { equipment: Equipment[], records: MaintenanceRecord[], user: UserProfile, onDeleteRecord: (id: string) => void, searchTerm: string }) {
+function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTerm, sendAlert }: { equipment: Equipment[], records: MaintenanceRecord[], user: UserProfile, onDeleteRecord: (id: string) => void, searchTerm: string, sendAlert: any }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isCompleteModalOpen, setIsCompleteModalOpen] = useState(false);
@@ -1995,6 +2092,7 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
 
     const totalPartsCost = usedParts.reduce((acc, p) => acc + (p.quantity * p.unitCost), 0);
     const totalLaborCost = Number(formData.get('totalLaborCost'));
+    const notes = formData.get('notes') as string;
 
     const data: any = {
       equipmentId: selectedEquipId,
@@ -2009,14 +2107,15 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
       scheduledEndTime: formData.get('scheduledEndTime') as string,
       totalPartsCost,
       totalLaborCost,
-      usedParts
+      usedParts,
+      notes
     };
 
     await addDoc(collection(db, 'maintenance_records'), data);
     
     // Send Alert
-    const alertMsg = `Equipamento: ${equip.name}\nModelo: ${equip.model}\nSérie: ${equip.serialNumber}\nPlano: ${plan.description}\nIniciada em: ${format(new Date(), 'dd/MM/yyyy HH:mm')}`;
-    await sendAlert(alertMsg, '⚠️ NOVA ORDEM DE SERVIÇO', 'new');
+    const alertMsg = `Equipamento: ${equip.name}\nModelo: ${equip.model}\nSérie: ${equip.serialNumber}\nPlano: ${plan.description}\nIniciada em: ${format(new Date(), 'dd/MM/yyyy HH:mm')}${notes ? `\nObservações: ${notes}` : ''}`;
+    await sendAlert(alertMsg, `⚠️ NOVA OS: ${plan.description}`, 'new');
 
     setIsModalOpen(false);
     setSelectedParts([]);
@@ -2091,11 +2190,13 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
 
     const formData = new FormData(e.currentTarget);
     const hourMeter = Number(formData.get('hourMeter'));
+    const notes = formData.get('notes') as string;
 
     const update: any = { 
       status: 'completed',
       endDate: new Date().toISOString(),
-      hourMeter
+      hourMeter,
+      notes: notes || completingRecord.notes || ''
     };
 
     // Update record
@@ -2106,12 +2207,8 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
       currentHours: hourMeter
     });
 
-    // Send Alert
-    const equip = equipment.find(e => e.id === completingRecord.equipmentId);
-    if (equip) {
-      const alertMsg = `Equipamento: ${equip.name}\nModelo: ${equip.model}\nSérie: ${equip.serialNumber}\nPlano: ${completingRecord.planDescription}\nConcluída em: ${format(new Date(), 'dd/MM/yyyy HH:mm')}\nHorímetro: ${hourMeter}h`;
-      await sendAlert(alertMsg, '✅ MANUTENÇÃO CONCLUÍDA', 'maintenance');
-    }
+    const alertMsg = `Manutenção concluída: ${completingRecord.equipmentName}\nPlano: ${completingRecord.planDescription}\nHorímetro: ${hourMeter}h${notes ? `\nObservações: ${notes}` : ''}`;
+    await sendAlert(alertMsg, `✅ CONCLUÍDA: ${completingRecord.planDescription}`, 'new');
 
     setIsCompleteModalOpen(false);
     setCompletingRecord(null);
@@ -2154,22 +2251,22 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
       <div className="grid grid-cols-1 gap-4">
         {filteredRecords.map(record => (
           <Card key={record.id} className="p-6">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-6">
-                <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
+            <div className="flex items-center justify-between gap-6">
+              <div className="flex items-center gap-6 min-w-0">
+                <div className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 ${
                   record.status === 'in-progress' ? 'bg-orange-100 text-orange-600' : 
                   record.status === 'completed' ? 'bg-emerald-100 text-emerald-600' : 
                   'bg-zinc-100 text-zinc-400'
                 }`}>
                   {record.status === 'in-progress' ? <Clock /> : record.status === 'completed' ? <CheckCircle2 /> : <AlertCircle />}
                 </div>
-                <div>
-                  <h4 className="font-bold text-zinc-900">{record.equipmentName}</h4>
-                  <p className="text-sm text-zinc-500">{record.planDescription}</p>
+                <div className="min-w-0">
+                  <h4 className="font-bold text-zinc-900 truncate">{record.equipmentName}</h4>
+                  <p className="text-sm text-zinc-500 truncate">{record.planDescription}</p>
                 </div>
               </div>
 
-              <div className="flex items-center gap-8">
+              <div className="flex items-center gap-8 shrink-0">
                 <div className="text-right">
                   <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Status</p>
                   <p className={`text-sm font-bold capitalize ${
@@ -2327,6 +2424,16 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
                 <p className="text-xs text-zinc-400 italic">Nenhuma peça cadastrada para este equipamento.</p>
               )}
             </div>
+
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Observações / Descrição</label>
+              <textarea 
+                name="notes" 
+                rows={3}
+                placeholder="Descreva detalhes da manutenção..."
+                className="w-full px-4 py-2.5 bg-white border border-zinc-200 rounded-xl text-sm font-bold text-zinc-700 focus:outline-none focus:ring-4 focus:ring-zinc-100 focus:border-zinc-400 transition-all shadow-sm"
+              />
+            </div>
           </div>
 
           <div className="flex justify-end gap-3 pt-4">
@@ -2363,6 +2470,17 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
               <p className="text-[10px] text-zinc-500 italic">
                 O horímetro do equipamento será atualizado automaticamente com este valor.
               </p>
+              
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Observações Finais</label>
+                <textarea 
+                  name="notes" 
+                  rows={3}
+                  defaultValue={completingRecord.notes}
+                  placeholder="Relate o que foi feito..."
+                  className="w-full px-4 py-2.5 bg-white border border-zinc-200 rounded-xl text-sm font-bold text-zinc-700 focus:outline-none focus:ring-4 focus:ring-zinc-100 focus:border-zinc-400 transition-all shadow-sm"
+                />
+              </div>
             </div>
 
             <div className="flex justify-end gap-3 pt-4">
@@ -2498,7 +2616,7 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
   );
 }
 
-function PartsSection({ equipment, user, searchTerm }: { equipment: Equipment[], user: UserProfile, searchTerm: string }) {
+function PartsSection({ equipment, user, searchTerm, sendAlert }: { equipment: Equipment[], user: UserProfile, searchTerm: string, sendAlert: any }) {
   const filteredEquipment = equipment.filter(item => 
     item.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
@@ -2534,7 +2652,13 @@ function PartsSection({ equipment, user, searchTerm }: { equipment: Equipment[],
         <div className="lg:col-span-3">
           {selectedEquipId ? (
             <Card className="p-6">
-              <PartsList equipmentId={selectedEquipId} user={user} searchTerm={searchTerm} />
+              <PartsList 
+                equipmentId={selectedEquipId} 
+                equipmentName={equipment.find(e => e.id === selectedEquipId)?.name || ''} 
+                user={user} 
+                searchTerm={searchTerm} 
+                sendAlert={sendAlert}
+              />
             </Card>
           ) : (
             <div className="h-64 flex items-center justify-center border-2 border-dashed border-zinc-200 rounded-2xl text-zinc-400">
@@ -2797,7 +2921,7 @@ function ReportsSection({ equipment, records, user, onDeleteRecord, searchTerm }
   );
 }
 
-function UsersSection({ user, searchTerm }: { user: UserProfile, searchTerm: string }) {
+function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert }: { user: UserProfile, searchTerm: string, showToast: (m: string, t?: any) => void, setConfirmModal: any, sendAlert: any }) {
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -2833,7 +2957,7 @@ function UsersSection({ user, searchTerm }: { user: UserProfile, searchTerm: str
 
   const handleRoleChange = async (uid: string, newRole: UserRole) => {
     if (uid === user.uid) {
-      alert('Você não pode alterar seu próprio nível de acesso.');
+      showToast('Você não pode alterar seu próprio nível de acesso.', 'error');
       return;
     }
     await updateDoc(doc(db, 'users', uid), { role: newRole });
@@ -2841,12 +2965,26 @@ function UsersSection({ user, searchTerm }: { user: UserProfile, searchTerm: str
 
   const handleDeleteUser = async (uid: string) => {
     if (uid === user.uid) {
-      alert('Você não pode excluir seu próprio usuário.');
+      showToast('Você não pode excluir seu próprio usuário.', 'error');
       return;
     }
-    if (confirm('Tem certeza que deseja excluir este usuário?')) {
-      await deleteDoc(doc(db, 'users', uid));
-    }
+    setConfirmModal({
+      isOpen: true,
+      title: 'Excluir Usuário',
+      message: 'Tem certeza que deseja excluir este usuário?',
+      onConfirm: async () => {
+        try {
+          const userToDelete = users.find(u => u.uid === uid);
+          await deleteDoc(doc(db, 'users', uid));
+          if (userToDelete) {
+            await sendAlert(`Usuário excluído: ${userToDelete.name} (@${userToDelete.username})`, '🗑️ USUÁRIO EXCLUÍDO', 'alert');
+          }
+          showToast('Usuário excluído com sucesso.', 'success');
+        } catch (err) {
+          showToast('Erro ao excluir usuário.', 'error');
+        }
+      }
+    });
   };
 
   const handleRegisterUser = async (e: React.FormEvent) => {
@@ -2881,6 +3019,7 @@ function UsersSection({ user, searchTerm }: { user: UserProfile, searchTerm: str
       console.log('Saving user to Firestore with ID:', username, userData);
       
       await setDoc(doc(db, 'users', username), userData);
+      await sendAlert(`Novo usuário cadastrado: ${userData.name} (@${userData.username})`, '👤 NOVO USUÁRIO', 'new');
 
       console.log('User saved successfully');
       setIsModalOpen(false);
@@ -2908,6 +3047,7 @@ function UsersSection({ user, searchTerm }: { user: UserProfile, searchTerm: str
         phoneNumber: editingUser.phoneNumber || '',
         receiveAlerts: editingUser.receiveAlerts || false
       });
+      await sendAlert(`Usuário atualizado: ${editingUser.name} (@${editingUser.username})`, '👤 USUÁRIO ATUALIZADO', 'new');
       setIsEditModalOpen(false);
       setEditingUser(null);
     } catch (err: any) {
@@ -3104,10 +3244,23 @@ function UsersSection({ user, searchTerm }: { user: UserProfile, searchTerm: str
                 <p className="font-bold text-zinc-900 truncate">{u.name}</p>
                 <p className="text-xs text-zinc-500 truncate">{u.username ? `@${u.username}` : 'Sem usuário'}</p>
                 {u.phoneNumber && (
-                  <p className="text-[10px] text-zinc-400 font-bold mt-1 flex items-center gap-1">
-                    <Bell size={10} className={u.receiveAlerts ? "text-emerald-500" : "text-zinc-300"} />
-                    {u.phoneNumber}
-                  </p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <button 
+                      onClick={async () => {
+                        if (user.role === 'admin' || user.uid === u.uid) {
+                          await updateDoc(doc(db, 'users', u.uid), { receiveAlerts: !u.receiveAlerts });
+                          showToast(`Alertas ${!u.receiveAlerts ? 'ativados' : 'desativados'} para ${u.name}`, 'info');
+                        }
+                      }}
+                      className={`p-1 rounded-md transition-colors ${u.receiveAlerts ? 'bg-emerald-50 text-emerald-600' : 'bg-zinc-50 text-zinc-400'}`}
+                      title={u.receiveAlerts ? "Desativar Alertas" : "Ativar Alertas"}
+                    >
+                      <Bell size={12} />
+                    </button>
+                    <p className="text-[10px] text-zinc-400 font-bold truncate">
+                      {u.phoneNumber}
+                    </p>
+                  </div>
                 )}
               </div>
               {user.role === 'admin' && (
