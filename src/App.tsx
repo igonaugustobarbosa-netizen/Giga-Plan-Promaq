@@ -256,13 +256,12 @@ export default function App() {
   const [modalType, setModalType] = useState<'equipment' | 'part' | 'plan' | 'record' | null>(null);
   const [selectedEquipment, setSelectedEquipment] = useState<Equipment | null>(null);
   const [selectedRecord, setSelectedRecord] = useState<MaintenanceRecord | null>(null);
-  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [allPlans, setAllPlans] = useState<MaintenancePlan[]>([]);
-  const [notifications, setNotifications] = useState<AppNotification[]>([]);
-  const [firestoreNotifications, setFirestoreNotifications] = useState<AppNotification[]>([]);
   const [initialEquipId, setInitialEquipId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' | 'info' } | null>(null);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean;
     title: string;
@@ -282,58 +281,38 @@ export default function App() {
     setTimeout(() => setToast(null), 5000);
   };
 
-  const sendAlert = async (message: string, title: string = 'Alerta de Sistema', type: 'new' | 'maintenance' | 'alert' = 'alert', customId?: string) => {
-    console.log(`[sendAlert] Starting... Title: ${title}, Type: ${type}, CustomID: ${customId}`);
+  const sendAlert = async (description: string, title: string, type: 'new' | 'maintenance' | 'alert' = 'alert') => {
     try {
-      // 1. Save to Firestore for in-app notifications
-      const notificationData = {
+      console.log('Sending alert:', { title, description, type });
+      const whatsappMessage = encodeURIComponent(`*${title}*\n\n${description}\n\n_Enviado via GIGA Plan_`);
+      await addDoc(collection(db, 'notifications'), {
         title,
-        description: message,
+        description,
         type,
         date: new Date().toISOString(),
-        readBy: []
-      };
-      
-      if (customId) {
-        await setDoc(doc(db, 'notifications', customId), notificationData);
-        console.log(`[sendAlert] Notification saved to Firestore with ID: ${customId}`);
-      } else {
-        const docRef = await addDoc(collection(db, 'notifications'), notificationData);
-        console.log(`[sendAlert] Notification saved to Firestore. ID: ${docRef.id}`);
-      }
-
-      // Trigger local notification for the sender immediately if permitted
-      if ("Notification" in window && Notification.permission === "granted") {
-        try {
-          new Notification(title, { body: message });
-        } catch (e) {
-          console.error("[sendAlert] Local notification failed:", e);
-        }
-      }
-
-      // 2. Simulate WhatsApp
-      console.log(`[sendAlert] Querying all users...`);
-      const snapshot = await getDocs(collection(db, 'users'));
-      const allUsers = snapshot.docs.map(d => d.data() as UserProfile);
-      const users = allUsers.filter(u => u.receiveAlerts === true);
-      console.log(`[sendAlert] Found ${users.length} users with alerts enabled.`);
-      
-      users.forEach(u => {
-        console.log(`[sendAlert] Checking user: ${u.name}, Phone: ${u.phoneNumber}`);
-        if (u.phoneNumber) {
-          const cleanPhone = u.phoneNumber.replace(/\D/g, '');
-          if (cleanPhone) {
-            console.log(`[ALERT SENT TO ${u.name} (${cleanPhone})]: ${message}`);
-          }
-        }
+        readBy: [],
+        whatsappMessage,
+        creatorUid: user?.uid || 'system'
       });
-      
-      showToast(`${title} - Notificação enviada com sucesso.`, 'success');
-      return users.length;
-    } catch (error) {
-      console.error('[sendAlert] Error sending alerts:', error);
-      showToast('Erro ao enviar notificação', 'error');
-      return 0;
+    } catch (err) {
+      console.error('Error sending alert:', err);
+    }
+  };
+
+  const markNotificationsAsRead = async () => {
+    if (!user || notifications.length === 0) return;
+    const unread = notifications.filter(n => !n.readBy?.includes(user.uid));
+    if (unread.length === 0) return;
+
+    try {
+      const batch = unread.map(n => 
+        updateDoc(doc(db, 'notifications', n.id), {
+          readBy: [...(n.readBy || []), user.uid]
+        })
+      );
+      await Promise.all(batch);
+    } catch (err) {
+      console.error('Error marking notifications as read:', err);
     }
   };
 
@@ -364,12 +343,10 @@ export default function App() {
             uid: firebaseUser.uid,
             username: firebaseUser.email || '',
             name: firebaseUser.displayName || 'Usuário',
-            role: firebaseUser.email === 'igonaugustobarbosa@gmail.com' ? 'admin' : 'operator',
-            receiveAlerts: true
+            role: firebaseUser.email === 'igonaugustobarbosa@gmail.com' ? 'admin' : 'operator'
           };
           try {
             await setDoc(doc(db, 'users', firebaseUser.uid), newUser);
-            await sendAlert(`Novo usuário cadastrado via Google: ${newUser.name} (${newUser.username})`, '👤 NOVO USUÁRIO', 'new');
             setUser(newUser);
             localStorage.setItem('giga_plan_user', JSON.stringify(newUser));
           } catch (err) {
@@ -425,7 +402,7 @@ export default function App() {
     };
   }, [user]);
 
-  // Fetch all plans for notifications
+  // Fetch all plans
   useEffect(() => {
     if (!user || equipment.length === 0) return;
     
@@ -478,177 +455,28 @@ export default function App() {
     };
   }, [user, equipment]);
 
-  // Listen to persistent notifications from Firestore
+  // Notifications Listener
   useEffect(() => {
     if (!user) return;
-    console.log('Setting up notifications listener...');
-    
-    let unsub: (() => void) | null = null;
-
-    const setupListener = (useOrderBy: boolean) => {
-      const baseColl = collection(db, 'notifications');
-      const q = useOrderBy 
-        ? query(baseColl, orderBy('date', 'desc'), limit(50))
-        : query(baseColl, limit(50));
-
-      return onSnapshot(q, (snapshot) => {
-        console.log(`Firestore notifications received (orderBy: ${useOrderBy}). Count:`, snapshot.size);
-        const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as AppNotification));
-
-        // Trigger browser notification for NEW notifications only (not initial load)
-        if (!snapshot.metadata.fromCache && snapshot.docChanges().length > 0) {
-          snapshot.docChanges().forEach((change) => {
-            if (change.type === "added") {
-              const data = change.doc.data() as AppNotification;
-              const msgDate = parseISO(data.date);
-              const now = new Date();
-              // Only notify if the message is very recent (last 30 seconds)
-              if (now.getTime() - msgDate.getTime() < 30000) {
-                // Show in-app toast
-                showToast(`Nova Notificação: ${data.title}`, 'info');
-
-                if ("Notification" in window && Notification.permission === "granted") {
-                  try {
-                    new Notification(data.title, { 
-                      body: data.description,
-                      icon: '/favicon.ico'
-                    });
-                  } catch (e) {
-                    console.error("Error showing browser notification:", e);
-                  }
-                }
-              }
-            }
-          });
-        }
-
-        if (!useOrderBy) {
-          setFirestoreNotifications(docs.sort((a, b) => parseISO(b.date).getTime() - parseISO(a.date).getTime()));
-        } else {
-          setFirestoreNotifications(docs);
-        }
-      }, (error) => {
-        console.error('Error fetching notifications:', error);
-        if (useOrderBy && error.message.includes('index')) {
-          console.log('Missing index for notifications. Retrying without orderBy...');
-          unsub = setupListener(false);
-        }
-      });
-    };
-
-    unsub = setupListener(true);
-    return () => { if (unsub) unsub(); };
+    const q = query(collection(db, 'notifications'), orderBy('date', 'desc'), limit(50));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as AppNotification));
+      console.log('Notifications received:', data.length);
+      setNotifications(data);
+    });
+    return () => unsubscribe();
   }, [user]);
 
-  // Browser notification permission logic removed as per user request
-  
-  // Calculate local derived notifications and merge with Firestore
+  // Toast for new notifications
   useEffect(() => {
-    if (!user) return;
-
-    const calculateNotifications = async () => {
-      const localNotifications: any[] = [];
-      const now = new Date();
-
-      // 1. New Equipment (last 3 days)
-      equipment.forEach(equip => {
-        const createdDate = equip.createdAt ? parseISO(equip.createdAt) : null;
-        if (createdDate && differenceInDays(now, createdDate) <= 3) {
-          localNotifications.push({
-            id: `local-new-equip-${equip.id}`,
-            title: 'Novo Equipamento',
-            description: `${equip.name} foi cadastrado recentemente.`,
-            type: 'new',
-            date: equip.createdAt
-          });
-        }
-      });
-
-      // 2. Upcoming Maintenance & Overdue
-      // Use for...of to handle async sendAlert calls correctly
-      for (const plan of allPlans) {
-        const equip = equipment.find(e => e.id === plan.equipmentId);
-        if (!equip) continue;
-
-        const planRecords = maintenanceRecords.filter(r => r.planId === plan.id && r.status === 'completed');
-        const lastRecord = planRecords.sort((a, b) => parseISO(b.startDate).getTime() - parseISO(a.startDate).getTime())[0];
-
-        const lastHourMeter = lastRecord?.hourMeter || 0;
-        const nextMaintenanceHour = lastHourMeter + plan.intervalHours;
-        const remainingHours = nextMaintenanceHour - (equip.currentHours || 0);
-        
-        if (equip.avgHoursPerDay && equip.avgHoursPerDay > 0) {
-          const days = Math.ceil(remainingHours / equip.avgHoursPerDay);
-          
-          // Deterministic ID for this specific maintenance cycle
-          const cycleId = `maint-${equip.id}-${plan.id}-${nextMaintenanceHour}`;
-
-          if (days >= 0 && days <= 7) {
-            // Local notification
-            localNotifications.push({
-              id: `local-${cycleId}`,
-              title: 'Manutenção Próxima',
-              description: `${equip.name} (Mod: ${equip.model}, S/N: ${equip.serialNumber}): ${plan.description} em aprox. ${days} dias.`,
-              type: 'maintenance',
-              date: new Date().toISOString()
-            });
-
-            // Trigger persistent alert if not already sent (only for admins/supervisors)
-            if (user.role !== 'operator') {
-              const alreadySent = firestoreNotifications.some(n => n.id === cycleId);
-              if (!alreadySent) {
-                await sendAlert(
-                  `${equip.name} (${equip.model}): ${plan.description} está próxima (aprox. ${days} dias).`,
-                  '⚠️ MANUTENÇÃO PRÓXIMA',
-                  'maintenance',
-                  cycleId
-                );
-              }
-            }
-          } else if (days < 0) {
-            const overdueId = `overdue-${cycleId}`;
-            localNotifications.push({
-              id: `local-${overdueId}`,
-              title: 'Manutenção Atrasada',
-              description: `${equip.name} (Mod: ${equip.model}, S/N: ${equip.serialNumber}): ${plan.description} está atrasada!`,
-              type: 'maintenance',
-              date: new Date().toISOString()
-            });
-
-            if (user.role !== 'operator') {
-              const alreadySent = firestoreNotifications.some(n => n.id === overdueId);
-              if (!alreadySent) {
-                await sendAlert(
-                  `${equip.name} (${equip.model}): ${plan.description} ESTÁ ATRASADA!`,
-                  '🚨 MANUTENÇÃO ATRASADA',
-                  'alert',
-                  overdueId
-                );
-              }
-            }
-          }
-        }
-      }
-
-      // Merge and sort
-      const filteredLocal = localNotifications.filter(ln => 
-        !firestoreNotifications.some(fn => fn.id === ln.id.replace('local-', ''))
-      );
-
-      const combined = [...firestoreNotifications, ...filteredLocal];
-      const sorted = combined.sort((a, b) => {
-        try {
-          return parseISO(b.date).getTime() - parseISO(a.date).getTime();
-        } catch (e) {
-          return 0;
-        }
-      });
-      console.log('Final notifications list updated. Count:', sorted.length);
-      setNotifications(sorted);
-    };
-
-    calculateNotifications();
-  }, [equipment, allPlans, maintenanceRecords, firestoreNotifications, user]);
+    if (!user || notifications.length === 0) return;
+    const latest = notifications[0];
+    const isNew = (new Date().getTime() - new Date(latest.date).getTime()) < 5000;
+    
+    if (isNew && latest.creatorUid !== user.uid && !latest.readBy?.includes(user.uid)) {
+      showToast(`${latest.title}`, 'info');
+    }
+  }, [notifications, user]);
 
   const handleGoogleLogin = async () => {
     setAuthError('');
@@ -674,7 +502,7 @@ export default function App() {
           const record = maintenanceRecords.find(r => r.id === id);
           await deleteDoc(doc(db, 'maintenance_records', id));
           if (record) {
-            await sendAlert(`Registro de manutenção excluído: ${record.equipmentName} - ${record.planDescription}`, '🗑️ MANUTENÇÃO EXCLUÍDA', 'alert');
+            await sendAlert(`Manutenção excluída: ${record.planDescription} para ${record.equipmentName}`, '🗑️ MANUTENÇÃO EXCLUÍDA', 'alert');
           }
           showToast('Registro excluído com sucesso.', 'success');
         } catch (err: any) {
@@ -943,98 +771,16 @@ export default function App() {
             >
               <Menu size={20} />
             </button>
-            <h2 className="text-lg font-bold text-zinc-900 capitalize">{activeTab}</h2>
+            <h2 className="text-lg font-bold text-zinc-900">
+              {activeTab === 'dashboard' ? 'Dashboard' :
+               activeTab === 'equipment' ? 'Equipamentos' :
+               activeTab === 'maintenance' ? 'Manutenções' :
+               activeTab === 'parts' ? 'Peças' :
+               activeTab === 'reports' ? 'Relatórios' : 'Usuários'}
+            </h2>
           </div>
+
           <div className="flex items-center gap-4">
-            <div className="relative">
-              <button 
-                onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
-                className="p-2 text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 rounded-full transition-all relative"
-              >
-                <Bell size={20} />
-                {notifications.length > 0 && (
-                  <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full border-2 border-white"></span>
-                )}
-              </button>
-
-              <AnimatePresence>
-                {isNotificationsOpen && (
-                  <>
-                    <div 
-                      className="fixed inset-0 z-20" 
-                      onClick={() => setIsNotificationsOpen(false)}
-                    ></div>
-                    <motion.div 
-                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                      className="absolute right-0 mt-2 w-80 bg-white/95 backdrop-blur-md rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.15)] border border-white/20 z-30 overflow-hidden"
-                    >
-                      <div className="p-4 border-b border-zinc-100 flex items-center justify-between bg-zinc-50/80">
-                        <h3 className="text-xs font-bold text-zinc-900 uppercase tracking-widest">Notificações</h3>
-                        <div className="flex items-center gap-2">
-                          {"Notification" in window && Notification.permission !== "granted" && (
-                            <button 
-                              onClick={() => Notification.requestPermission()}
-                              className="text-[10px] font-bold text-blue-600 hover:underline"
-                            >
-                              Ativar Browser
-                            </button>
-                          )}
-                          <span className="text-[10px] font-bold px-2 py-0.5 bg-zinc-200 text-zinc-600 rounded-full">
-                            {notifications.length}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="max-h-96 overflow-y-auto">
-                        {notifications.length > 0 ? (
-                          notifications.map(notif => (
-                            <div key={notif.id} className="p-4 border-b border-zinc-50 last:border-0 hover:bg-zinc-50 transition-colors cursor-default group">
-                              <div className="flex gap-3">
-                                <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
-                                  notif.type === 'new' ? 'bg-blue-100 text-blue-600' : 
-                                  notif.type === 'alert' ? 'bg-red-100 text-red-600' :
-                                  'bg-orange-100 text-orange-600'
-                                }`}>
-                                  {notif.type === 'new' ? <Plus size={14} /> : 
-                                   notif.type === 'alert' ? <Bell size={14} /> :
-                                   <AlertCircle size={14} />}
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-start justify-between gap-2">
-                                    <p className="text-sm font-bold text-zinc-900 leading-tight">{notif.title}</p>
-                                    <button 
-                                      onClick={() => {
-                                        const text = encodeURIComponent(`*${notif.title}*\n${notif.description}`);
-                                        window.open(`https://wa.me/?text=${text}`, '_blank');
-                                      }}
-                                      className="p-1 text-zinc-300 hover:text-emerald-500 transition-colors opacity-0 group-hover:opacity-100"
-                                      title="Enviar via WhatsApp"
-                                    >
-                                      <MessageCircle size={14} />
-                                    </button>
-                                  </div>
-                                  <p className="text-xs text-zinc-500 mt-1 leading-relaxed">{notif.description}</p>
-                                  <p className="text-[10px] text-zinc-400 mt-2 font-medium">
-                                    {format(parseISO(notif.date), 'dd/MM/yyyy HH:mm')}
-                                  </p>
-                                </div>
-                              </div>
-                            </div>
-                          ))
-                        ) : (
-                          <div className="p-8 text-center text-zinc-400">
-                            <Bell className="mx-auto mb-2 opacity-20" size={32} />
-                            <p className="text-xs">Nenhuma notificação no momento.</p>
-                          </div>
-                        )}
-                      </div>
-                    </motion.div>
-                  </>
-                )}
-              </AnimatePresence>
-            </div>
-
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={16} />
               <input 
@@ -1045,14 +791,98 @@ export default function App() {
                 className="pl-10 pr-4 py-2 bg-zinc-100 border-none rounded-full text-sm focus:ring-2 focus:ring-black/5 w-64"
               />
             </div>
+
+            <div className="relative">
+              <button 
+                onClick={() => {
+                  setIsNotificationsOpen(!isNotificationsOpen);
+                  if (!isNotificationsOpen) markNotificationsAsRead();
+                }}
+                className="p-2 text-zinc-500 hover:bg-zinc-100 rounded-lg relative group"
+              >
+                <Bell size={20} className={notifications.filter(n => !n.readBy?.includes(user.uid)).length > 0 ? 'text-zinc-900' : 'text-zinc-500'} />
+                {notifications.filter(n => !n.readBy?.includes(user.uid)).length > 0 && (
+                  <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full border-2 border-white animate-pulse" />
+                )}
+              </button>
+
+              <AnimatePresence>
+                {isNotificationsOpen && (
+                  <>
+                    <div 
+                      className="fixed inset-0 z-40" 
+                      onClick={() => setIsNotificationsOpen(false)} 
+                    />
+                    <motion.div
+                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                      className="absolute right-0 mt-2 w-80 bg-white rounded-2xl shadow-2xl border border-zinc-100 z-50 overflow-hidden"
+                    >
+                      <div className="p-4 border-b border-zinc-100 flex items-center justify-between">
+                        <h3 className="font-bold text-zinc-900">Notificações</h3>
+                        <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">
+                          {notifications.length} Total
+                        </span>
+                      </div>
+                      <div className="max-h-[400px] overflow-y-auto">
+                        {notifications.length === 0 ? (
+                          <div className="p-8 text-center">
+                            <Bell className="mx-auto text-zinc-200 mb-2" size={32} />
+                            <p className="text-sm text-zinc-500">Nenhuma notificação</p>
+                          </div>
+                        ) : (
+                          notifications.map((n) => (
+                            <div 
+                              key={n.id}
+                              className={`p-4 border-b border-zinc-50 hover:bg-zinc-50 transition-colors relative group ${!n.readBy?.includes(user.uid) ? 'bg-zinc-50/50' : ''}`}
+                            >
+                              <div className="flex gap-3">
+                                <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
+                                  n.type === 'new' ? 'bg-emerald-100 text-emerald-600' :
+                                  n.type === 'maintenance' ? 'bg-blue-100 text-blue-600' :
+                                  'bg-amber-100 text-amber-600'
+                                }`}>
+                                  {n.type === 'new' ? <Plus size={14} /> : 
+                                   n.type === 'maintenance' ? <Wrench size={14} /> : 
+                                   <AlertCircle size={14} />}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-bold text-zinc-900">{n.title}</p>
+                                  <p className="text-xs text-zinc-500 line-clamp-2 mt-0.5">{n.description}</p>
+                                  <div className="flex items-center justify-between mt-2">
+                                    <span className="text-[10px] text-zinc-400 font-medium">
+                                      {format(new Date(n.date), 'dd/MM/yyyy HH:mm')}
+                                    </span>
+                                    <a 
+                                      href={`https://wa.me/?text=${n.whatsappMessage}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="p-1.5 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors shadow-sm"
+                                      title="Enviar via WhatsApp"
+                                    >
+                                      <MessageCircle size={12} />
+                                    </a>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </motion.div>
+                  </>
+                )}
+              </AnimatePresence>
+            </div>
           </div>
         </header>
 
         <div className="p-8 max-w-7xl mx-auto">
-          {activeTab === 'dashboard' && <Dashboard equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} allPlans={allPlans} searchTerm={searchTerm} showToast={showToast} />}
+          {activeTab === 'dashboard' && <Dashboard equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} allPlans={allPlans} searchTerm={searchTerm} showToast={showToast} notifications={notifications} />}
           {activeTab === 'equipment' && <EquipmentSection equipment={equipment} user={user} initialEquipId={initialEquipId} onClearInitialId={() => setInitialEquipId(null)} searchTerm={searchTerm} showToast={showToast} setConfirmModal={setConfirmModal} sendAlert={sendAlert} />}
           {activeTab === 'maintenance' && <MaintenanceSection equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} searchTerm={searchTerm} sendAlert={sendAlert} />}
-          {activeTab === 'parts' && <PartsSection equipment={equipment} user={user} searchTerm={searchTerm} sendAlert={sendAlert} />}
+          {activeTab === 'parts' && <PartsSection equipment={equipment} user={user} searchTerm={searchTerm} />}
           {activeTab === 'reports' && <ReportsSection equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} searchTerm={searchTerm} />}
           {activeTab === 'users' && <UsersSection user={user} searchTerm={searchTerm} showToast={showToast} setConfirmModal={setConfirmModal} sendAlert={sendAlert} />}
         </div>
@@ -1099,7 +929,7 @@ function NavItem({ active, onClick, icon, label }: any) {
 
 // --- Sections ---
 
-function Dashboard({ equipment, records, user, onDeleteRecord, allPlans, searchTerm, showToast }: { equipment: Equipment[], records: MaintenanceRecord[], user: UserProfile, onDeleteRecord: (id: string) => void, allPlans: MaintenancePlan[], searchTerm: string, showToast: (m: string, t?: any) => void }) {
+function Dashboard({ equipment, records, user, onDeleteRecord, allPlans, searchTerm, showToast, notifications }: { equipment: Equipment[], records: MaintenanceRecord[], user: UserProfile, onDeleteRecord: (id: string) => void, allPlans: MaintenancePlan[], searchTerm: string, showToast: (m: string, t?: any) => void, notifications: AppNotification[] }) {
   const activeMaintenances = records.filter(r => r.status === 'in-progress');
   
   // Calculate due maintenances
@@ -1168,8 +998,8 @@ function Dashboard({ equipment, records, user, onDeleteRecord, allPlans, searchT
         </Card>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <Card className="p-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <Card className="p-6 lg:col-span-2">
           <div className="flex items-center justify-between mb-6">
             <h3 className="font-bold text-zinc-900">Manutenções em Andamento</h3>
             <span className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Tempo Real</span>
@@ -1219,11 +1049,47 @@ function Dashboard({ equipment, records, user, onDeleteRecord, allPlans, searchT
 
         <Card className="p-6">
           <div className="flex items-center justify-between mb-6">
+            <h3 className="font-bold text-zinc-900">Notificações Recentes</h3>
+            <Bell className="text-zinc-300" size={20} />
+          </div>
+          <div className="space-y-4">
+            {notifications.slice(0, 5).map(n => (
+              <div key={n.id} className="p-3 rounded-xl bg-zinc-50 border border-zinc-100">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className={`w-2 h-2 rounded-full ${n.type === 'alert' ? 'bg-red-500' : 'bg-blue-500'}`} />
+                  <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{n.title}</p>
+                </div>
+                <p className="text-xs text-zinc-600 line-clamp-2">{n.description}</p>
+                <div className="flex items-center justify-between mt-2">
+                  <p className="text-[10px] text-zinc-400">{format(parseISO(n.date), 'dd/MM HH:mm')}</p>
+                  {n.whatsappMessage && (
+                    <a 
+                      href={`https://wa.me/?text=${n.whatsappMessage}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-emerald-500 hover:text-emerald-600"
+                    >
+                      <MessageCircle size={14} />
+                    </a>
+                  )}
+                </div>
+              </div>
+            ))}
+            {notifications.length === 0 && (
+              <p className="text-center py-8 text-zinc-400 text-sm">Sem notificações</p>
+            )}
+          </div>
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-1 gap-8">
+        <Card className="p-6">
+          <div className="flex items-center justify-between mb-6">
             <h3 className="font-bold text-zinc-900">Equipamentos Críticos</h3>
             <span className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Status</span>
           </div>
-          <div className="space-y-4">
-            {equipment.slice(0, 5).map(item => (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {equipment.slice(0, 6).map(item => (
               <div key={item.id} className="flex items-center justify-between p-4 rounded-xl border border-zinc-100 hover:border-zinc-200 transition-colors">
                 <div className="flex items-center gap-4">
                   <div className="w-12 h-12 rounded-lg bg-zinc-100 flex items-center justify-center overflow-hidden">
@@ -1334,10 +1200,10 @@ function EquipmentSection({ equipment, user, initialEquipId, onClearInitialId, s
     try {
       if (editingItem) {
         await updateDoc(doc(db, 'equipment', editingItem.id), data);
-        await sendAlert(`Equipamento atualizado: ${data.name}`, '📦 EQUIPAMENTO ATUALIZADO', 'new');
+        await sendAlert(`Equipamento atualizado: ${data.name} (${data.model})`, '🚜 EQUIPAMENTO ATUALIZADO', 'new');
       } else {
         await addDoc(collection(db, 'equipment'), data);
-        await sendAlert(`Novo equipamento cadastrado: ${data.name}`, '📦 NOVO EQUIPAMENTO', 'new');
+        await sendAlert(`Novo equipamento cadastrado: ${data.name} (${data.model})`, '🚜 NOVO EQUIPAMENTO', 'new');
       }
       setIsModalOpen(false);
       setEditingItem(null);
@@ -1359,7 +1225,7 @@ function EquipmentSection({ equipment, user, initialEquipId, onClearInitialId, s
           const equip = equipment.find(e => e.id === id);
           await deleteDoc(doc(db, 'equipment', id));
           if (equip) {
-            await sendAlert(`Equipamento excluído: ${equip.name}`, '🗑️ EQUIPAMENTO EXCLUÍDO', 'alert');
+            await sendAlert(`Equipamento excluído: ${equip.name} (${equip.model})`, '🗑️ EQUIPAMENTO EXCLUÍDO', 'alert');
           }
           showToast('Equipamento excluído com sucesso.', 'success');
         } catch (error) {
@@ -1727,8 +1593,8 @@ function EquipmentSection({ equipment, user, initialEquipId, onClearInitialId, s
               </div>
             </div>
             
-            <PartsList equipmentId={viewingItem.id} equipmentName={viewingItem.name} user={user} searchTerm={searchTerm} sendAlert={sendAlert} />
-            <PlansList equipment={viewingItem} user={user} showToast={showToast} setConfirmModal={setConfirmModal} sendAlert={sendAlert} />
+            <PartsList equipmentId={viewingItem.id} equipmentName={viewingItem.name} user={user} searchTerm={searchTerm} />
+            <PlansList equipment={viewingItem} user={user} showToast={showToast} setConfirmModal={setConfirmModal} />
           </div>
         )}
       </Modal>
@@ -1736,7 +1602,7 @@ function EquipmentSection({ equipment, user, initialEquipId, onClearInitialId, s
   );
 }
 
-function PartsList({ equipmentId, equipmentName, user, searchTerm, sendAlert }: { equipmentId: string, equipmentName: string, user: UserProfile, searchTerm: string, sendAlert: any }) {
+function PartsList({ equipmentId, equipmentName, user, searchTerm }: { equipmentId: string, equipmentName: string, user: UserProfile, searchTerm: string }) {
   const [parts, setParts] = useState<Part[]>([]);
   const [isAdding, setIsAdding] = useState(false);
 
@@ -1762,7 +1628,6 @@ function PartsList({ equipmentId, equipmentName, user, searchTerm, sendAlert }: 
       cost: Number(formData.get('cost'))
     };
     await addDoc(collection(db, 'equipment', equipmentId, 'parts'), data);
-    await sendAlert(`Nova peça cadastrada para ${equipmentName}: ${data.name}`, '🔧 NOVA PEÇA', 'new');
     setIsAdding(false);
   };
 
@@ -1810,7 +1675,7 @@ function PartsList({ equipmentId, equipmentName, user, searchTerm, sendAlert }: 
   );
 }
 
-function PlansList({ equipment, user, showToast, setConfirmModal, sendAlert }: { equipment: Equipment, user: UserProfile, showToast: (m: string, t?: any) => void, setConfirmModal: any, sendAlert: any }) {
+function PlansList({ equipment, user, showToast, setConfirmModal }: { equipment: Equipment, user: UserProfile, showToast: (m: string, t?: any) => void, setConfirmModal: any }) {
   const equipmentId = equipment.id;
   const [plans, setPlans] = useState<MaintenancePlan[]>([]);
   const [parts, setParts] = useState<Part[]>([]);
@@ -1874,7 +1739,6 @@ function PlansList({ equipment, user, showToast, setConfirmModal, sendAlert }: {
     };
     try {
       await addDoc(collection(db, 'equipment', equipmentId, 'plans'), data);
-      await sendAlert(`Novo plano de manutenção para ${equipment.name}: ${data.description}`, '📋 NOVO PLANO', 'new');
       setIsAdding(false);
       setSelectedParts([]);
     } catch (error) {
@@ -1967,11 +1831,7 @@ function PlansList({ equipment, user, showToast, setConfirmModal, sendAlert }: {
                     message: 'Deseja excluir este plano?',
                     onConfirm: async () => {
                       try {
-                        const planToDelete = plans.find(p => p.id === plan.id);
                         await deleteDoc(doc(db, 'equipment', equipmentId, 'plans', plan.id));
-                        if (planToDelete) {
-                          await sendAlert(`Plano de manutenção excluído de ${equipment.name}: ${planToDelete.description}`, '🗑️ PLANO EXCLUÍDO', 'alert');
-                        }
                         showToast('Plano excluído com sucesso.', 'success');
                       } catch (err) {
                         showToast('Erro ao excluir plano.', 'error');
@@ -2112,11 +1972,8 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
     };
 
     await addDoc(collection(db, 'maintenance_records'), data);
+    await sendAlert(`Manutenção iniciada: ${data.planDescription} para ${data.equipmentName}`, '🛠️ MANUTENÇÃO INICIADA', 'maintenance');
     
-    // Send Alert
-    const alertMsg = `Equipamento: ${equip.name}\nModelo: ${equip.model}\nSérie: ${equip.serialNumber}\nPlano: ${plan.description}\nIniciada em: ${format(new Date(), 'dd/MM/yyyy HH:mm')}${notes ? `\nObservações: ${notes}` : ''}`;
-    await sendAlert(alertMsg, `⚠️ NOVA OS: ${plan.description}`, 'new');
-
     setIsModalOpen(false);
     setSelectedParts([]);
   };
@@ -2207,8 +2064,7 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
       currentHours: hourMeter
     });
 
-    const alertMsg = `Manutenção concluída: ${completingRecord.equipmentName}\nPlano: ${completingRecord.planDescription}\nHorímetro: ${hourMeter}h${notes ? `\nObservações: ${notes}` : ''}`;
-    await sendAlert(alertMsg, `✅ CONCLUÍDA: ${completingRecord.planDescription}`, 'new');
+    await sendAlert(`Manutenção concluída: ${completingRecord.planDescription} para ${completingRecord.equipmentName}. Horímetro: ${hourMeter}`, '✅ MANUTENÇÃO CONCLUÍDA', 'maintenance');
 
     setIsCompleteModalOpen(false);
     setCompletingRecord(null);
@@ -2616,7 +2472,7 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
   );
 }
 
-function PartsSection({ equipment, user, searchTerm, sendAlert }: { equipment: Equipment[], user: UserProfile, searchTerm: string, sendAlert: any }) {
+function PartsSection({ equipment, user, searchTerm }: { equipment: Equipment[], user: UserProfile, searchTerm: string }) {
   const filteredEquipment = equipment.filter(item => 
     item.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
@@ -2657,7 +2513,6 @@ function PartsSection({ equipment, user, searchTerm, sendAlert }: { equipment: E
                 equipmentName={equipment.find(e => e.id === selectedEquipId)?.name || ''} 
                 user={user} 
                 searchTerm={searchTerm} 
-                sendAlert={sendAlert}
               />
             </Card>
           ) : (
@@ -2927,7 +2782,7 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [newUser, setNewUser] = useState({ name: '', username: '', password: '', role: 'operator' as UserRole, phoneNumber: '', receiveAlerts: false });
+  const [newUser, setNewUser] = useState({ name: '', username: '', password: '', role: 'operator' as UserRole, phoneNumber: '' });
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [showEditPassword, setShowEditPassword] = useState(false);
@@ -3012,15 +2867,13 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
         password: newUser.password,
         name: newUser.name.trim(),
         role: newUser.role,
-        phoneNumber: newUser.phoneNumber,
-        receiveAlerts: newUser.receiveAlerts
+        phoneNumber: newUser.phoneNumber
       };
 
       console.log('Saving user to Firestore with ID:', username, userData);
       
       await setDoc(doc(db, 'users', username), userData);
       await sendAlert(`Novo usuário cadastrado: ${userData.name} (@${userData.username})`, '👤 NOVO USUÁRIO', 'new');
-
       console.log('User saved successfully');
       setIsModalOpen(false);
       setNewUser({ name: '', username: '', password: '', role: 'operator' });
@@ -3044,10 +2897,8 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
         name: editingUser.name,
         role: editingUser.role,
         password: editingUser.password,
-        phoneNumber: editingUser.phoneNumber || '',
-        receiveAlerts: editingUser.receiveAlerts || false
+        phoneNumber: editingUser.phoneNumber || ''
       });
-      await sendAlert(`Usuário atualizado: ${editingUser.name} (@${editingUser.username})`, '👤 USUÁRIO ATUALIZADO', 'new');
       setIsEditModalOpen(false);
       setEditingUser(null);
     } catch (err: any) {
@@ -3129,11 +2980,6 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
             value={newUser.phoneNumber}
             onChange={(e: any) => setNewUser({ ...newUser, phoneNumber: e.target.value })}
           />
-          <Toggle 
-            label="Receber Alertas de Manutenção"
-            checked={newUser.receiveAlerts}
-            onChange={(val: boolean) => setNewUser({ ...newUser, receiveAlerts: val })}
-          />
           
           {error && (
             <div className="p-3 bg-red-50 border border-red-100 rounded-xl text-red-600 text-xs font-medium">
@@ -3205,11 +3051,6 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
               value={editingUser.phoneNumber || ''}
               onChange={(e: any) => setEditingUser({ ...editingUser, phoneNumber: e.target.value })}
             />
-            <Toggle 
-              label="Receber Alertas de Manutenção"
-              checked={editingUser.receiveAlerts || false}
-              onChange={(val: boolean) => setEditingUser({ ...editingUser, receiveAlerts: val })}
-            />
             
             {error && (
               <div className="p-3 bg-red-50 border border-red-100 rounded-xl text-red-600 text-xs font-medium">
@@ -3245,18 +3086,6 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
                 <p className="text-xs text-zinc-500 truncate">{u.username ? `@${u.username}` : 'Sem usuário'}</p>
                 {u.phoneNumber && (
                   <div className="flex items-center gap-2 mt-1">
-                    <button 
-                      onClick={async () => {
-                        if (user.role === 'admin' || user.uid === u.uid) {
-                          await updateDoc(doc(db, 'users', u.uid), { receiveAlerts: !u.receiveAlerts });
-                          showToast(`Alertas ${!u.receiveAlerts ? 'ativados' : 'desativados'} para ${u.name}`, 'info');
-                        }
-                      }}
-                      className={`p-1 rounded-md transition-colors ${u.receiveAlerts ? 'bg-emerald-50 text-emerald-600' : 'bg-zinc-50 text-zinc-400'}`}
-                      title={u.receiveAlerts ? "Desativar Alertas" : "Ativar Alertas"}
-                    >
-                      <Bell size={12} />
-                    </button>
                     <p className="text-[10px] text-zinc-400 font-bold truncate">
                       {u.phoneNumber}
                     </p>

@@ -7,7 +7,6 @@ export interface UserProfile {
   name: string;
   role: UserRole;
   phoneNumber?: string;
-  receiveAlerts?: boolean;
 }
 
 export interface Equipment {
@@ -79,4 +78,6 @@ export interface AppNotification {
   type: 'new' | 'maintenance' | 'alert';
   date: string;
   readBy?: string[];
+  whatsappMessage?: string;
+  creatorUid?: string;
 }
