@@ -23,6 +23,7 @@ import {
   updateDoc,
   deleteDoc,
   orderBy,
+  limit,
   Timestamp,
   collectionGroup
 } from 'firebase/firestore';
@@ -262,7 +263,8 @@ export default function App() {
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [allPlans, setAllPlans] = useState<MaintenancePlan[]>([]);
-  const [notifications, setNotifications] = useState<{ id: string, title: string, description: string, type: 'new' | 'maintenance', date: string }[]>([]);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [firestoreNotifications, setFirestoreNotifications] = useState<AppNotification[]>([]);
   const [initialEquipId, setInitialEquipId] = useState<string | null>(null);
 
   // Auth Form States
@@ -354,81 +356,99 @@ export default function App() {
   // Fetch all plans for notifications
   useEffect(() => {
     if (!user) return;
+    console.log('Setting up collectionGroup listener for plans...');
     const unsub = onSnapshot(collectionGroup(db, 'plans'), (snapshot) => {
+      console.log('Plans snapshot received. Count:', snapshot.size);
       setAllPlans(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as MaintenancePlan)));
+    }, (error) => {
+      console.error('Error in collectionGroup(plans):', error);
+      // If collectionGroup fails (likely missing index), we can try to fetch plans per equipment
+      // but for now we just log it.
     });
     return () => unsub();
   }, [user]);
 
-  // Calculate Notifications (Combined Local + Firestore)
+  // Listen to persistent notifications from Firestore
+  useEffect(() => {
+    if (!user) return;
+    console.log('Setting up notifications listener...');
+    const q = query(collection(db, 'notifications'), orderBy('date', 'desc'), limit(50));
+    const unsub = onSnapshot(q, (snapshot) => {
+      console.log('Firestore notifications received. Count:', snapshot.size);
+      setFirestoreNotifications(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as AppNotification)));
+    }, (error) => {
+      console.error('Error fetching notifications:', error);
+    });
+    return () => unsub();
+  }, [user]);
+
+  // Calculate local derived notifications and merge with Firestore
   useEffect(() => {
     if (!user) return;
 
-    // Listen to persistent notifications from Firestore
-    const q = query(collection(db, 'notifications'), orderBy('date', 'desc'));
-    const unsubFirestore = onSnapshot(q, (snapshot) => {
-      const firestoreNotifications = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as AppNotification));
-      
-      // Calculate local derived notifications
-      const localNotifications: any[] = [];
-      const now = new Date();
+    const localNotifications: any[] = [];
+    const now = new Date();
 
-      // 1. New Equipment (last 3 days)
-      equipment.forEach(equip => {
-        const createdDate = equip.createdAt ? parseISO(equip.createdAt) : null;
-        if (createdDate && differenceInDays(now, createdDate) <= 3) {
-          localNotifications.push({
-            id: `new-equip-${equip.id}`,
-            title: 'Novo Equipamento',
-            description: `${equip.name} foi cadastrado recentemente.`,
-            type: 'new',
-            date: equip.createdAt
-          });
-        }
-      });
-
-      // 2. Upcoming Maintenance
-      allPlans.forEach(plan => {
-        const equip = equipment.find(e => e.id === plan.equipmentId);
-        if (!equip) return;
-
-        const lastRecord = maintenanceRecords
-          .filter(r => r.planId === plan.id && r.status === 'completed')
-          .sort((a, b) => parseISO(b.startDate).getTime() - parseISO(a.startDate).getTime())[0];
-
-        const lastHourMeter = lastRecord?.hourMeter || 0;
-        const nextMaintenanceHour = lastHourMeter + plan.intervalHours;
-        const remainingHours = nextMaintenanceHour - (equip.currentHours || 0);
-        
-        if (equip.avgHoursPerDay && equip.avgHoursPerDay > 0) {
-          const days = Math.ceil(remainingHours / equip.avgHoursPerDay);
-          if (days >= 0 && days <= 7) {
-            localNotifications.push({
-              id: `maint-${plan.id}`,
-              title: 'Manutenção Próxima',
-              description: `${equip.name}: ${plan.description} em aprox. ${days} dias.`,
-              type: 'maintenance',
-              date: new Date().toISOString()
-            });
-          } else if (days < 0) {
-            localNotifications.push({
-              id: `maint-overdue-${plan.id}`,
-              title: 'Manutenção Atrasada',
-              description: `${equip.name}: ${plan.description} está atrasada!`,
-              type: 'maintenance',
-              date: new Date().toISOString()
-            });
-          }
-        }
-      });
-
-      // Merge and sort
-      const combined = [...firestoreNotifications, ...localNotifications];
-      setNotifications(combined.sort((a, b) => parseISO(b.date).getTime() - parseISO(a.date).getTime()));
+    // 1. New Equipment (last 3 days)
+    equipment.forEach(equip => {
+      const createdDate = equip.createdAt ? parseISO(equip.createdAt) : null;
+      if (createdDate && differenceInDays(now, createdDate) <= 3) {
+        localNotifications.push({
+          id: `new-equip-${equip.id}`,
+          title: 'Novo Equipamento',
+          description: `${equip.name} foi cadastrado recentemente.`,
+          type: 'new',
+          date: equip.createdAt
+        });
+      }
     });
 
-    return () => unsubFirestore();
-  }, [equipment, allPlans, maintenanceRecords, user]);
+    // 2. Upcoming Maintenance
+    allPlans.forEach(plan => {
+      const equip = equipment.find(e => e.id === plan.equipmentId);
+      if (!equip) return;
+
+      const planRecords = maintenanceRecords.filter(r => r.planId === plan.id && r.status === 'completed');
+      const lastRecord = planRecords.sort((a, b) => parseISO(b.startDate).getTime() - parseISO(a.startDate).getTime())[0];
+
+      const lastHourMeter = lastRecord?.hourMeter || 0;
+      const nextMaintenanceHour = lastHourMeter + plan.intervalHours;
+      const remainingHours = nextMaintenanceHour - (equip.currentHours || 0);
+      
+      if (equip.avgHoursPerDay && equip.avgHoursPerDay > 0) {
+        const days = Math.ceil(remainingHours / equip.avgHoursPerDay);
+        if (days >= 0 && days <= 7) {
+          localNotifications.push({
+            id: `maint-${plan.id}`,
+            title: 'Manutenção Próxima',
+            description: `${equip.name}: ${plan.description} em aprox. ${days} dias.`,
+            type: 'maintenance',
+            date: new Date().toISOString()
+          });
+        } else if (days < 0) {
+          localNotifications.push({
+            id: `maint-overdue-${plan.id}`,
+            title: 'Manutenção Atrasada',
+            description: `${equip.name}: ${plan.description} está atrasada!`,
+            type: 'maintenance',
+            date: new Date().toISOString()
+          });
+        }
+      }
+    });
+
+    console.log('Local notifications calculated:', localNotifications.length);
+
+    // Merge and sort
+    const combined = [...firestoreNotifications, ...localNotifications];
+    setNotifications(combined.sort((a, b) => {
+      try {
+        return parseISO(b.date).getTime() - parseISO(a.date).getTime();
+      } catch (e) {
+        return 0;
+      }
+    }));
+  }, [equipment, allPlans, maintenanceRecords, firestoreNotifications, user]);
 
   const handleGoogleLogin = async () => {
     setAuthError('');
@@ -861,7 +881,7 @@ function Dashboard({ equipment, records, user, onDeleteRecord, allPlans, searchT
     const equipPlans = allPlans.filter(p => p.equipmentId === equip.id);
     return equipPlans.map(plan => {
       const planRecords = records.filter(r => r.planId === plan.id && r.status === 'completed');
-      const lastRecord = planRecords[0];
+      const lastRecord = planRecords.sort((a, b) => parseISO(b.startDate).getTime() - parseISO(a.startDate).getTime())[0];
       const lastHourMeter = lastRecord?.hourMeter || 0;
       const nextMaintenanceHour = lastHourMeter + plan.intervalHours;
       const remainingHours = nextMaintenanceHour - (equip.currentHours || 0);
