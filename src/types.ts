@@ -6,6 +6,8 @@ export interface UserProfile {
   password?: string;
   name: string;
   role: UserRole;
+  phoneNumber?: string;
+  receiveAlerts?: boolean;
 }
 
 export interface Equipment {

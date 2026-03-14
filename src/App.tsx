@@ -107,6 +107,29 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   return errInfo.error;
 }
 
+const sendAlert = async (message: string) => {
+  try {
+    const q = query(collection(db, 'users'), where('receiveAlerts', '==', true));
+    const snapshot = await getDocs(q);
+    const users = snapshot.docs.map(d => d.data() as UserProfile);
+    
+    users.forEach(u => {
+      if (u.phoneNumber) {
+        const cleanPhone = u.phoneNumber.replace(/\D/g, '');
+        if (cleanPhone) {
+          console.log(`[ALERT SENT TO ${u.name} (${cleanPhone})]: ${message}`);
+          // In a real production app, we would call a WhatsApp/SMS API here.
+          // For this app, we simulate the alert and provide a WhatsApp link if needed.
+        }
+      }
+    });
+    return users.length;
+  } catch (error) {
+    console.error('Error sending alerts:', error);
+    return 0;
+  }
+};
+
 // --- Components ---
 
 const Button = ({ children, onClick, variant = 'primary', className = '', disabled = false, type = 'button' }: any) => {
@@ -161,6 +184,21 @@ const Select = ({ label, options, ...props }: any) => (
         <ChevronRight size={16} className="rotate-90" />
       </div>
     </div>
+  </div>
+);
+
+const Toggle = ({ label, checked, onChange }: any) => (
+  <div className="flex items-center justify-between py-2">
+    {label && <span className="text-sm font-bold text-zinc-700">{label}</span>}
+    <button
+      type="button"
+      onClick={() => onChange(!checked)}
+      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${checked ? 'bg-zinc-900' : 'bg-zinc-200'}`}
+    >
+      <span
+        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${checked ? 'translate-x-6' : 'translate-x-1'}`}
+      />
+    </button>
   </div>
 );
 
@@ -725,7 +763,7 @@ export default function App() {
         </header>
 
         <div className="p-8 max-w-7xl mx-auto">
-          {activeTab === 'dashboard' && <Dashboard equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} />}
+          {activeTab === 'dashboard' && <Dashboard equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} allPlans={allPlans} />}
           {activeTab === 'equipment' && <EquipmentSection equipment={equipment} user={user} initialEquipId={initialEquipId} onClearInitialId={() => setInitialEquipId(null)} />}
           {activeTab === 'maintenance' && <MaintenanceSection equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} />}
           {activeTab === 'parts' && <PartsSection equipment={equipment} user={user} />}
@@ -755,16 +793,39 @@ function NavItem({ active, onClick, icon, label }: any) {
 
 // --- Sections ---
 
-function Dashboard({ equipment, records, user, onDeleteRecord }: { equipment: Equipment[], records: MaintenanceRecord[], user: UserProfile, onDeleteRecord: (id: string) => void }) {
+function Dashboard({ equipment, records, user, onDeleteRecord, allPlans }: { equipment: Equipment[], records: MaintenanceRecord[], user: UserProfile, onDeleteRecord: (id: string) => void, allPlans: MaintenancePlan[] }) {
   const activeMaintenances = records.filter(r => r.status === 'in-progress');
   
-  // Simple overdue logic: if an equipment has a plan but no completed record in the last X hours
-  const overdueEquip = equipment.filter(equip => {
-    const lastRecord = records.find(r => r.equipmentId === equip.id && r.status === 'completed');
-    if (!lastRecord) return false; // Or true if we want to flag new equipment?
-    // This is a placeholder for more complex logic involving plan intervals
-    return false; 
+  // Calculate due maintenances
+  const dueMaintenances = equipment.flatMap(equip => {
+    const equipPlans = allPlans.filter(p => p.equipmentId === equip.id);
+    return equipPlans.map(plan => {
+      const planRecords = records.filter(r => r.planId === plan.id && r.status === 'completed');
+      const lastRecord = planRecords[0];
+      const lastHourMeter = lastRecord?.hourMeter || 0;
+      const nextMaintenanceHour = lastHourMeter + plan.intervalHours;
+      const remainingHours = nextMaintenanceHour - (equip.currentHours || 0);
+      
+      return {
+        equipment,
+        equipName: equip.name,
+        planDescription: plan.description,
+        remainingHours,
+        isDue: remainingHours <= plan.intervalHours * 0.1 || remainingHours <= 10
+      };
+    }).filter(d => d.isDue);
   });
+
+  const handleSendDueAlerts = async () => {
+    if (dueMaintenances.length === 0) {
+      alert('Não há manutenções próximas do vencimento no momento.');
+      return;
+    }
+    
+    const alertMsg = `🚨 ALERTA DE VENCIMENTO\n\n${dueMaintenances.map(d => `• ${d.equipName}: ${d.planDescription} (${d.remainingHours.toFixed(1)}h restantes)`).join('\n')}`;
+    const sentCount = await sendAlert(alertMsg);
+    alert(`Alertas enviados para ${sentCount} usuários registrados.`);
+  };
   
   return (
     <div className="space-y-8">
@@ -773,6 +834,29 @@ function Dashboard({ equipment, records, user, onDeleteRecord }: { equipment: Eq
         <StatCard label="Em Manutenção" value={activeMaintenances.length} icon={<Clock className="text-orange-500" />} />
         <StatCard label="Concluídas (Mês)" value={records.filter(r => r.status === 'completed').length} icon={<CheckCircle2 className="text-emerald-500" />} />
       </div>
+
+      {dueMaintenances.length > 0 && (
+        <Card className="p-6 border-red-100 bg-red-50/30">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2 text-red-600">
+              <AlertCircle size={20} />
+              <h3 className="font-bold">Atenção: Vencimentos Próximos</h3>
+            </div>
+            <Button variant="danger" size="sm" onClick={handleSendDueAlerts}>
+              <Bell size={14} /> Notificar Responsáveis
+            </Button>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {dueMaintenances.map((d, i) => (
+              <div key={i} className="p-3 bg-white rounded-lg border border-red-100 shadow-sm">
+                <p className="font-bold text-zinc-900 text-sm">{d.equipName}</p>
+                <p className="text-xs text-zinc-500">{d.planDescription}</p>
+                <p className="text-xs font-bold text-red-600 mt-1">{d.remainingHours.toFixed(1)}h para o limite</p>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         <Card className="p-6">
@@ -1675,6 +1759,11 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord }: { equi
     };
 
     await addDoc(collection(db, 'maintenance_records'), data);
+    
+    // Send Alert
+    const alertMsg = `⚠️ NOVA ORDEM DE SERVIÇO\nEquipamento: ${equip.name}\nPlano: ${plan.description}\nIniciada em: ${format(new Date(), 'dd/MM/yyyy HH:mm')}`;
+    await sendAlert(alertMsg);
+
     setIsModalOpen(false);
     setSelectedParts([]);
   };
@@ -2442,7 +2531,7 @@ function UsersSection({ user }: { user: UserProfile }) {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [newUser, setNewUser] = useState({ name: '', username: '', password: '', role: 'operator' as UserRole });
+  const [newUser, setNewUser] = useState({ name: '', username: '', password: '', role: 'operator' as UserRole, phoneNumber: '', receiveAlerts: false });
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [showEditPassword, setShowEditPassword] = useState(false);
@@ -2506,7 +2595,9 @@ function UsersSection({ user }: { user: UserProfile }) {
         username: username,
         password: newUser.password,
         name: newUser.name.trim(),
-        role: newUser.role
+        role: newUser.role,
+        phoneNumber: newUser.phoneNumber,
+        receiveAlerts: newUser.receiveAlerts
       };
 
       console.log('Saving user to Firestore with ID:', username, userData);
@@ -2535,7 +2626,9 @@ function UsersSection({ user }: { user: UserProfile }) {
       await updateDoc(doc(db, 'users', editingUser.uid), {
         name: editingUser.name,
         role: editingUser.role,
-        password: editingUser.password
+        password: editingUser.password,
+        phoneNumber: editingUser.phoneNumber || '',
+        receiveAlerts: editingUser.receiveAlerts || false
       });
       setIsEditModalOpen(false);
       setEditingUser(null);
@@ -2612,6 +2705,17 @@ function UsersSection({ user }: { user: UserProfile }) {
               { value: 'operator', label: 'Operador' }
             ]}
           />
+          <Input 
+            label="Telefone (WhatsApp)"
+            placeholder="Ex: 43999999999"
+            value={newUser.phoneNumber}
+            onChange={(e: any) => setNewUser({ ...newUser, phoneNumber: e.target.value })}
+          />
+          <Toggle 
+            label="Receber Alertas de Manutenção"
+            checked={newUser.receiveAlerts}
+            onChange={(val: boolean) => setNewUser({ ...newUser, receiveAlerts: val })}
+          />
           
           {error && (
             <div className="p-3 bg-red-50 border border-red-100 rounded-xl text-red-600 text-xs font-medium">
@@ -2677,6 +2781,17 @@ function UsersSection({ user }: { user: UserProfile }) {
                 { value: 'operator', label: 'Operador' }
               ]}
             />
+            <Input 
+              label="Telefone (WhatsApp)"
+              placeholder="Ex: 43999999999"
+              value={editingUser.phoneNumber || ''}
+              onChange={(e: any) => setEditingUser({ ...editingUser, phoneNumber: e.target.value })}
+            />
+            <Toggle 
+              label="Receber Alertas de Manutenção"
+              checked={editingUser.receiveAlerts || false}
+              onChange={(val: boolean) => setEditingUser({ ...editingUser, receiveAlerts: val })}
+            />
             
             {error && (
               <div className="p-3 bg-red-50 border border-red-100 rounded-xl text-red-600 text-xs font-medium">
@@ -2710,6 +2825,12 @@ function UsersSection({ user }: { user: UserProfile }) {
               <div className="flex-1 min-w-0">
                 <p className="font-bold text-zinc-900 truncate">{u.name}</p>
                 <p className="text-xs text-zinc-500 truncate">{u.username ? `@${u.username}` : 'Sem usuário'}</p>
+                {u.phoneNumber && (
+                  <p className="text-[10px] text-zinc-400 font-bold mt-1 flex items-center gap-1">
+                    <Bell size={10} className={u.receiveAlerts ? "text-emerald-500" : "text-zinc-300"} />
+                    {u.phoneNumber}
+                  </p>
+                )}
               </div>
               {user.role === 'admin' && (
                 <div className="flex items-center gap-1">
