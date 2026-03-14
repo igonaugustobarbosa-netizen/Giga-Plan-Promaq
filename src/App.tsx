@@ -981,17 +981,17 @@ function EquipmentSection({ equipment, user, initialEquipId, onClearInitialId }:
                   <HardHat size={48} />
                 </div>
               )}
-              <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+              <div className="absolute top-4 right-4 flex gap-2 z-10">
                 <button 
                   onClick={() => setViewingItem(item)}
-                  className="p-2 bg-white/90 backdrop-blur rounded-lg shadow-lg text-zinc-700 hover:bg-white"
+                  className="p-2 bg-white/90 backdrop-blur rounded-lg shadow-lg text-zinc-700 hover:bg-white transition-all hover:scale-110"
                   title="Ver Detalhes"
                 >
                   <Eye size={16} />
                 </button>
                 <button 
                   onClick={() => setQrCodeItem(item)}
-                  className="p-2 bg-white/90 backdrop-blur rounded-lg shadow-lg text-zinc-700 hover:bg-white"
+                  className="p-2 bg-white/90 backdrop-blur rounded-lg shadow-lg text-zinc-700 hover:bg-white transition-all hover:scale-110"
                   title="Gerar QR Code"
                 >
                   <QrCode size={16} />
@@ -1000,13 +1000,15 @@ function EquipmentSection({ equipment, user, initialEquipId, onClearInitialId }:
                   <>
                     <button 
                       onClick={() => { setEditingItem(item); setIsModalOpen(true); }}
-                      className="p-2 bg-white/90 backdrop-blur rounded-lg shadow-lg text-zinc-700 hover:bg-white"
+                      className="p-2 bg-white/90 backdrop-blur rounded-lg shadow-lg text-zinc-700 hover:bg-white transition-all hover:scale-110"
+                      title="Editar"
                     >
                       <Edit3 size={16} />
                     </button>
                     <button 
                       onClick={() => handleDelete(item.id)}
-                      className="p-2 bg-white/90 backdrop-blur rounded-lg shadow-lg text-red-600 hover:bg-white"
+                      className="p-2 bg-white/90 backdrop-blur rounded-lg shadow-lg text-red-600 hover:bg-white transition-all hover:scale-110"
+                      title="Excluir"
                     >
                       <Trash2 size={16} />
                     </button>
