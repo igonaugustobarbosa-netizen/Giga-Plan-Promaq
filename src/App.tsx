@@ -55,8 +55,13 @@ import {
   Info,
   ShieldCheck,
   Users,
-  Bell
+  Bell,
+  QrCode,
+  Printer,
+  Menu,
+  X
 } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format, addHours, isAfter, parseISO, subDays, differenceInDays } from 'date-fns';
 import { UserProfile, Equipment, Part, MaintenancePlan, MaintenanceRecord, UserRole, MaintenanceStatus } from './types';
@@ -190,6 +195,7 @@ export default function App() {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [loginForm, setLoginForm] = useState({ username: '', password: '' });
   
   // Data States
@@ -203,6 +209,7 @@ export default function App() {
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [allPlans, setAllPlans] = useState<MaintenancePlan[]>([]);
   const [notifications, setNotifications] = useState<{ id: string, title: string, description: string, type: 'new' | 'maintenance', date: string }[]>([]);
+  const [initialEquipId, setInitialEquipId] = useState<string | null>(null);
 
   // Auth Form States
   const [authError, setAuthError] = useState('');
@@ -246,6 +253,18 @@ export default function App() {
       setLoading(false);
     });
     return () => unsubscribe();
+  }, []);
+
+  // Handle Query Parameters
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const equipId = params.get('equipId');
+    if (equipId) {
+      setInitialEquipId(equipId);
+      setActiveTab('equipment');
+      // Clear the param from URL without reloading
+      window.history.replaceState({}, '', window.location.pathname);
+    }
   }, []);
 
   // Data Sync Effect
@@ -524,54 +543,78 @@ export default function App() {
 
   // Acesso direto habilitado
   return (
-    <div className="min-h-screen bg-[#F8F9FA] flex">
+    <div className="min-h-screen bg-[#F8F9FA] flex overflow-x-hidden">
+      {/* Sidebar Overlay for Mobile */}
+      <AnimatePresence>
+        {isSidebarOpen && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setIsSidebarOpen(false)}
+            className="fixed inset-0 bg-black/20 backdrop-blur-sm z-40 lg:hidden"
+          />
+        )}
+      </AnimatePresence>
+
       {/* Sidebar */}
-      <aside className="w-64 bg-white border-r border-zinc-200 flex flex-col sticky top-0 h-screen">
-        <div className="p-6 flex items-center gap-3">
-          <div className="w-8 h-8 bg-black rounded-lg flex items-center justify-center">
-            <Wrench className="w-5 h-5 text-white" />
+      <aside className={`
+        fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-zinc-200 flex flex-col transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static lg:h-screen
+        ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+      `}>
+        <div className="p-6 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 bg-black rounded-lg flex items-center justify-center">
+              <Wrench className="w-5 h-5 text-white" />
+            </div>
+            <div className="flex flex-col">
+              <span className="font-bold text-lg tracking-tight leading-tight">GIGA Plan</span>
+              <span className="text-[10px] text-zinc-400 font-medium">Promaq v2.0</span>
+            </div>
           </div>
-          <div className="flex flex-col">
-            <span className="font-bold text-lg tracking-tight leading-tight">GIGA Plan Promaq</span>
-            <span className="text-[10px] text-zinc-400 font-medium">Dev: 43 996118806</span>
-          </div>
+          <button 
+            onClick={() => setIsSidebarOpen(false)}
+            className="p-2 text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 rounded-lg lg:hidden"
+          >
+            <X size={20} />
+          </button>
         </div>
 
         <nav className="flex-1 px-4 space-y-1">
           <NavItem 
             active={activeTab === 'dashboard'} 
-            onClick={() => setActiveTab('dashboard')} 
+            onClick={() => { setActiveTab('dashboard'); setIsSidebarOpen(false); }} 
             icon={<LayoutDashboard size={20} />} 
             label="Dashboard" 
           />
           <NavItem 
             active={activeTab === 'equipment'} 
-            onClick={() => setActiveTab('equipment')} 
+            onClick={() => { setActiveTab('equipment'); setIsSidebarOpen(false); }} 
             icon={<HardHat size={20} />} 
             label="Equipamentos" 
           />
           <NavItem 
             active={activeTab === 'maintenance'} 
-            onClick={() => setActiveTab('maintenance')} 
+            onClick={() => { setActiveTab('maintenance'); setIsSidebarOpen(false); }} 
             icon={<Clock size={20} />} 
             label="Manutenções" 
           />
           <NavItem 
             active={activeTab === 'parts'} 
-            onClick={() => setActiveTab('parts')} 
+            onClick={() => { setActiveTab('parts'); setIsSidebarOpen(false); }} 
             icon={<Package size={20} />} 
             label="Peças" 
           />
           <NavItem 
             active={activeTab === 'reports'} 
-            onClick={() => setActiveTab('reports')} 
+            onClick={() => { setActiveTab('reports'); setIsSidebarOpen(false); }} 
             icon={<FileText size={20} />} 
             label="Relatórios" 
           />
           {user.role === 'admin' && (
             <NavItem 
               active={activeTab === 'users'} 
-              onClick={() => setActiveTab('users')} 
+              onClick={() => { setActiveTab('users'); setIsSidebarOpen(false); }} 
               icon={<UserIcon size={20} />} 
               label="Usuários" 
             />
@@ -595,9 +638,17 @@ export default function App() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-y-auto">
-        <header className="h-16 bg-white border-b border-zinc-200 px-8 flex items-center justify-between sticky top-0 z-10">
-          <h2 className="text-lg font-bold text-zinc-900 capitalize">{activeTab}</h2>
+      <main className="flex-1 overflow-y-auto min-w-0">
+        <header className="h-16 bg-white border-b border-zinc-200 px-4 lg:px-8 flex items-center justify-between sticky top-0 z-10">
+          <div className="flex items-center gap-4">
+            <button 
+              onClick={() => setIsSidebarOpen(true)}
+              className="p-2 text-zinc-500 hover:bg-zinc-100 rounded-lg lg:hidden"
+            >
+              <Menu size={20} />
+            </button>
+            <h2 className="text-lg font-bold text-zinc-900 capitalize">{activeTab}</h2>
+          </div>
           <div className="flex items-center gap-4">
             <div className="relative">
               <button 
@@ -675,7 +726,7 @@ export default function App() {
 
         <div className="p-8 max-w-7xl mx-auto">
           {activeTab === 'dashboard' && <Dashboard equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} />}
-          {activeTab === 'equipment' && <EquipmentSection equipment={equipment} user={user} />}
+          {activeTab === 'equipment' && <EquipmentSection equipment={equipment} user={user} initialEquipId={initialEquipId} onClearInitialId={() => setInitialEquipId(null)} />}
           {activeTab === 'maintenance' && <MaintenanceSection equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} />}
           {activeTab === 'parts' && <PartsSection equipment={equipment} user={user} />}
           {activeTab === 'reports' && <ReportsSection equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} />}
@@ -811,10 +862,11 @@ function StatCard({ label, value, icon }: any) {
   );
 }
 
-function EquipmentSection({ equipment, user }: { equipment: Equipment[], user: UserProfile }) {
+function EquipmentSection({ equipment, user, initialEquipId, onClearInitialId }: { equipment: Equipment[], user: UserProfile, initialEquipId?: string | null, onClearInitialId?: () => void }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<Equipment | null>(null);
   const [viewingItem, setViewingItem] = useState<Equipment | null>(null);
+  const [qrCodeItem, setQrCodeItem] = useState<Equipment | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   
@@ -822,6 +874,16 @@ function EquipmentSection({ equipment, user }: { equipment: Equipment[], user: U
   const [manualSource, setManualSource] = useState<'url' | 'file'>('url');
   const [photoBase64, setPhotoBase64] = useState<string>('');
   const [manualBase64, setManualBase64] = useState<string>('');
+
+  useEffect(() => {
+    if (initialEquipId && equipment.length > 0) {
+      const equip = equipment.find(e => e.id === initialEquipId);
+      if (equip) {
+        setViewingItem(equip);
+        onClearInitialId?.();
+      }
+    }
+  }, [initialEquipId, equipment]);
 
   useEffect(() => {
     if (isModalOpen) {
@@ -923,8 +985,16 @@ function EquipmentSection({ equipment, user }: { equipment: Equipment[], user: U
                 <button 
                   onClick={() => setViewingItem(item)}
                   className="p-2 bg-white/90 backdrop-blur rounded-lg shadow-lg text-zinc-700 hover:bg-white"
+                  title="Ver Detalhes"
                 >
                   <Eye size={16} />
+                </button>
+                <button 
+                  onClick={() => setQrCodeItem(item)}
+                  className="p-2 bg-white/90 backdrop-blur rounded-lg shadow-lg text-zinc-700 hover:bg-white"
+                  title="Gerar QR Code"
+                >
+                  <QrCode size={16} />
                 </button>
                 {user.role !== 'operator' && (
                   <>
@@ -1078,14 +1148,127 @@ function EquipmentSection({ equipment, user }: { equipment: Equipment[], user: U
         </form>
       </Modal>
 
+      {/* QR Code Modal */}
+      <Modal
+        isOpen={!!qrCodeItem}
+        onClose={() => setQrCodeItem(null)}
+        title={`QR Code - ${qrCodeItem?.name}`}
+      >
+        <div className="flex flex-col items-center justify-center p-8 space-y-6">
+          <div className="p-4 bg-white rounded-2xl shadow-xl border border-zinc-100">
+            {qrCodeItem && (
+              <QRCodeSVG 
+                id="equipment-qrcode"
+                value={`${window.location.origin}?equipId=${qrCodeItem.id}`}
+                size={256}
+                level="H"
+                includeMargin={true}
+              />
+            )}
+          </div>
+          <div className="text-center space-y-2">
+            <p className="text-sm font-medium text-zinc-600">Escaneie para acessar os dados do equipamento</p>
+            <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">{qrCodeItem?.serialNumber}</p>
+          </div>
+          <div className="flex gap-3 w-full">
+            <Button 
+              variant="secondary" 
+              className="flex-1"
+              onClick={() => {
+                const svg = document.getElementById('equipment-qrcode');
+                if (svg) {
+                  const svgData = new XMLSerializer().serializeToString(svg);
+                  const canvas = document.createElement('canvas');
+                  const ctx = canvas.getContext('2d');
+                  const img = new Image();
+                  img.onload = () => {
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    ctx?.drawImage(img, 0, 0);
+                    const pngFile = canvas.toDataURL('image/png');
+                    const downloadLink = document.createElement('a');
+                    downloadLink.download = `qrcode-${qrCodeItem?.name}.png`;
+                    downloadLink.href = pngFile;
+                    downloadLink.click();
+                  };
+                  img.src = 'data:image/svg+xml;base64,' + btoa(svgData);
+                }
+              }}
+            >
+              <Download size={16} /> Baixar
+            </Button>
+            <Button 
+              className="flex-1 bg-black text-white hover:bg-zinc-800"
+              onClick={() => {
+                const svg = document.getElementById('equipment-qrcode');
+                if (svg) {
+                  const svgData = new XMLSerializer().serializeToString(svg);
+                  const printWindow = window.open('', '_blank');
+                  if (printWindow) {
+                    printWindow.document.write(`
+                      <html>
+                        <head>
+                          <title>Imprimir QR Code - ${qrCodeItem?.name}</title>
+                          <style>
+                            body { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; font-family: sans-serif; }
+                            .container { text-align: center; border: 1px solid #eee; padding: 40px; border-radius: 20px; }
+                            h1 { margin-bottom: 10px; font-size: 24px; }
+                            p { color: #666; margin-bottom: 30px; }
+                            .serial { font-weight: bold; color: #999; text-transform: uppercase; letter-spacing: 2px; font-size: 12px; }
+                            @media print {
+                              button { display: none; }
+                            }
+                          </style>
+                        </head>
+                        <body>
+                          <div class="container">
+                            <h1>${qrCodeItem?.name}</h1>
+                            <p>${qrCodeItem?.model || ''}</p>
+                            ${svgData}
+                            <div style="margin-top: 20px;" class="serial">${qrCodeItem?.serialNumber || ''}</div>
+                          </div>
+                          <script>
+                            setTimeout(() => {
+                              window.print();
+                              window.close();
+                            }, 500);
+                          </script>
+                        </body>
+                      </html>
+                    `);
+                    printWindow.document.close();
+                  }
+                }
+              }}
+            >
+              <Printer size={16} /> Imprimir
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
       {/* Detail View Modal */}
       <Modal 
         isOpen={!!viewingItem} 
         onClose={() => setViewingItem(null)} 
-        title={viewingItem?.name || ''}
+        title="Detalhes do Equipamento"
       >
         {viewingItem && (
           <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="text-lg font-bold text-zinc-900">{viewingItem.name}</h4>
+                <p className="text-xs text-zinc-500 uppercase tracking-widest font-bold">{viewingItem.model}</p>
+              </div>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="gap-2"
+                onClick={() => setQrCodeItem(viewingItem)}
+              >
+                <QrCode size={14} /> QR Code
+              </Button>
+            </div>
             <div className="aspect-video bg-zinc-100 rounded-xl overflow-hidden">
               {viewingItem.photoUrl ? (
                 <img src={viewingItem.photoUrl} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
