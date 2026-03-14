@@ -110,6 +110,7 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
 }
 
 const sendAlert = async (message: string, title: string = 'Alerta de Sistema', type: 'new' | 'maintenance' | 'alert' = 'alert') => {
+  console.log(`[sendAlert] Starting... Title: ${title}, Type: ${type}`);
   try {
     // 1. Save to Firestore for in-app notifications
     const notificationData = {
@@ -119,14 +120,18 @@ const sendAlert = async (message: string, title: string = 'Alerta de Sistema', t
       date: new Date().toISOString(),
       readBy: []
     };
-    await addDoc(collection(db, 'notifications'), notificationData);
+    const docRef = await addDoc(collection(db, 'notifications'), notificationData);
+    console.log(`[sendAlert] Notification saved to Firestore. ID: ${docRef.id}`);
 
     // 2. Simulate WhatsApp
-    const q = query(collection(db, 'users'), where('receiveAlerts', '==', true));
-    const snapshot = await getDocs(q);
-    const users = snapshot.docs.map(d => d.data() as UserProfile);
+    console.log(`[sendAlert] Querying all users...`);
+    const snapshot = await getDocs(collection(db, 'users'));
+    const allUsers = snapshot.docs.map(d => d.data() as UserProfile);
+    const users = allUsers.filter(u => u.receiveAlerts === true);
+    console.log(`[sendAlert] Found ${users.length} users with alerts enabled.`);
     
     users.forEach(u => {
+      console.log(`[sendAlert] Checking user: ${u.name}, Phone: ${u.phoneNumber}`);
       if (u.phoneNumber) {
         const cleanPhone = u.phoneNumber.replace(/\D/g, '');
         if (cleanPhone) {
@@ -136,19 +141,42 @@ const sendAlert = async (message: string, title: string = 'Alerta de Sistema', t
           if ("Notification" in window && Notification.permission === "granted") {
             new Notification(title, { body: message });
           }
+        } else {
+          console.warn(`[sendAlert] User ${u.name} has invalid phone number: ${u.phoneNumber}`);
         }
+      } else {
+        console.warn(`[sendAlert] User ${u.name} has no phone number.`);
       }
     });
     return users.length;
   } catch (error) {
-    console.error('Error sending alerts:', error);
+    console.error('[sendAlert] Error sending alerts:', error);
     return 0;
   }
 };
 
 // --- Components ---
 
-const Button = ({ children, onClick, variant = 'primary', className = '', disabled = false, type = 'button' }: any) => {
+const Toast = ({ message, type, onClose }: { message: string, type: 'success' | 'error' | 'info', onClose: () => void }) => (
+  <motion.div
+    initial={{ opacity: 0, y: 50, x: '-50%' }}
+    animate={{ opacity: 1, y: 0, x: '-50%' }}
+    exit={{ opacity: 0, y: 50, x: '-50%' }}
+    className={`fixed bottom-8 left-1/2 z-[100] px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-3 min-w-[300px] border ${
+      type === 'success' ? 'bg-emerald-500 text-white border-emerald-400' :
+      type === 'error' ? 'bg-red-500 text-white border-red-400' :
+      'bg-zinc-900 text-white border-zinc-800'
+    }`}
+  >
+    {type === 'success' ? <CheckCircle2 size={20} /> : type === 'error' ? <AlertCircle size={20} /> : <Bell size={20} />}
+    <p className="text-sm font-bold flex-1">{message}</p>
+    <button onClick={onClose} className="p-1 hover:bg-white/20 rounded-full transition-colors">
+      <Plus size={16} className="rotate-45" />
+    </button>
+  </motion.div>
+);
+
+const Button = ({ children, onClick, variant = 'primary', className = '', disabled = false, type = 'button', loading = false }: any) => {
   const variants: any = {
     primary: 'bg-zinc-900 text-white hover:bg-black shadow-md shadow-zinc-200/50 active:scale-[0.98]',
     secondary: 'bg-white text-zinc-900 border border-zinc-200 hover:bg-zinc-50 shadow-sm active:scale-[0.98]',
@@ -160,10 +188,12 @@ const Button = ({ children, onClick, variant = 'primary', className = '', disabl
     <button 
       type={type}
       onClick={onClick} 
-      disabled={disabled}
+      disabled={disabled || loading}
       className={`px-5 py-2.5 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed ${variants[variant]} ${className}`}
     >
-      {children}
+      {loading ? (
+        <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+      ) : children}
     </button>
   );
 };
@@ -266,6 +296,12 @@ export default function App() {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [firestoreNotifications, setFirestoreNotifications] = useState<AppNotification[]>([]);
   const [initialEquipId, setInitialEquipId] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' | 'info' } | null>(null);
+
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 5000);
+  };
 
   // Auth Form States
   const [authError, setAuthError] = useState('');
@@ -355,31 +391,88 @@ export default function App() {
 
   // Fetch all plans for notifications
   useEffect(() => {
-    if (!user) return;
+    if (!user || equipment.length === 0) return;
+    
     console.log('Setting up collectionGroup listener for plans...');
-    const unsub = onSnapshot(collectionGroup(db, 'plans'), (snapshot) => {
-      console.log('Plans snapshot received. Count:', snapshot.size);
-      setAllPlans(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as MaintenancePlan)));
-    }, (error) => {
-      console.error('Error in collectionGroup(plans):', error);
-      // If collectionGroup fails (likely missing index), we can try to fetch plans per equipment
-      // but for now we just log it.
-    });
-    return () => unsub();
-  }, [user]);
+    let unsubGroup: (() => void) | null = null;
+    let unsubFallbacks: (() => void)[] = [];
+
+    try {
+      unsubGroup = onSnapshot(collectionGroup(db, 'plans'), (snapshot) => {
+        console.log('Plans snapshot received via collectionGroup. Count:', snapshot.size);
+        if (snapshot.size > 0) {
+          setAllPlans(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as MaintenancePlan)));
+        } else {
+          console.log('collectionGroup(plans) returned empty. Trying fallback...');
+          setupFallbackListeners();
+        }
+      }, (error) => {
+        console.error('Error in collectionGroup(plans):', error);
+        setupFallbackListeners();
+      });
+    } catch (e) {
+      console.error('Failed to setup collectionGroup listener:', e);
+      setupFallbackListeners();
+    }
+
+    function setupFallbackListeners() {
+      console.log('Setting up fallback listeners for each equipment plans...');
+      // Clear previous fallback listeners
+      unsubFallbacks.forEach(unsub => unsub());
+      unsubFallbacks = [];
+
+      const allFetchedPlans: Record<string, MaintenancePlan[]> = {};
+
+      equipment.forEach(equip => {
+        const q = query(collection(db, 'equipment', equip.id, 'plans'));
+        const unsub = onSnapshot(q, (snapshot) => {
+          allFetchedPlans[equip.id] = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as MaintenancePlan));
+          
+          // Flatten and update state
+          const flattened = Object.values(allFetchedPlans).flat();
+          setAllPlans(flattened);
+        });
+        unsubFallbacks.push(unsub);
+      });
+    }
+
+    return () => {
+      if (unsubGroup) unsubGroup();
+      unsubFallbacks.forEach(unsub => unsub());
+    };
+  }, [user, equipment]);
 
   // Listen to persistent notifications from Firestore
   useEffect(() => {
     if (!user) return;
     console.log('Setting up notifications listener...');
-    const q = query(collection(db, 'notifications'), orderBy('date', 'desc'), limit(50));
-    const unsub = onSnapshot(q, (snapshot) => {
-      console.log('Firestore notifications received. Count:', snapshot.size);
-      setFirestoreNotifications(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as AppNotification)));
-    }, (error) => {
-      console.error('Error fetching notifications:', error);
-    });
-    return () => unsub();
+    
+    let unsub: (() => void) | null = null;
+
+    const setupListener = (useOrderBy: boolean) => {
+      const baseColl = collection(db, 'notifications');
+      const q = useOrderBy 
+        ? query(baseColl, orderBy('date', 'desc'), limit(50))
+        : query(baseColl, limit(50));
+
+      return onSnapshot(q, (snapshot) => {
+        console.log(`Firestore notifications received (orderBy: ${useOrderBy}). Count:`, snapshot.size);
+        let docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as AppNotification));
+        if (!useOrderBy) {
+          docs = docs.sort((a, b) => parseISO(b.date).getTime() - parseISO(a.date).getTime());
+        }
+        setFirestoreNotifications(docs);
+      }, (error) => {
+        console.error('Error fetching notifications:', error);
+        if (useOrderBy && error.message.includes('index')) {
+          console.log('Missing index for notifications. Retrying without orderBy...');
+          unsub = setupListener(false);
+        }
+      });
+    };
+
+    unsub = setupListener(true);
+    return () => { if (unsub) unsub(); };
   }, [user]);
 
   // Calculate local derived notifications and merge with Firestore
@@ -421,7 +514,7 @@ export default function App() {
           localNotifications.push({
             id: `maint-${plan.id}`,
             title: 'Manutenção Próxima',
-            description: `${equip.name}: ${plan.description} em aprox. ${days} dias.`,
+            description: `${equip.name} (Mod: ${equip.model}, S/N: ${equip.serialNumber}): ${plan.description} em aprox. ${days} dias.`,
             type: 'maintenance',
             date: new Date().toISOString()
           });
@@ -429,7 +522,7 @@ export default function App() {
           localNotifications.push({
             id: `maint-overdue-${plan.id}`,
             title: 'Manutenção Atrasada',
-            description: `${equip.name}: ${plan.description} está atrasada!`,
+            description: `${equip.name} (Mod: ${equip.model}, S/N: ${equip.serialNumber}): ${plan.description} está atrasada!`,
             type: 'maintenance',
             date: new Date().toISOString()
           });
@@ -441,13 +534,15 @@ export default function App() {
 
     // Merge and sort
     const combined = [...firestoreNotifications, ...localNotifications];
-    setNotifications(combined.sort((a, b) => {
+    const sorted = combined.sort((a, b) => {
       try {
         return parseISO(b.date).getTime() - parseISO(a.date).getTime();
       } catch (e) {
         return 0;
       }
-    }));
+    });
+    console.log('Final merged notifications count:', sorted.length);
+    setNotifications(sorted);
   }, [equipment, allPlans, maintenanceRecords, firestoreNotifications, user]);
 
   const handleGoogleLogin = async () => {
@@ -738,11 +833,20 @@ export default function App() {
           <div className="flex items-center gap-4">
             <button 
               onClick={async () => {
-                if ("Notification" in window) {
+                if (!("Notification" in window)) {
+                  showToast("Este navegador não suporta notificações desktop.", "error");
+                  return;
+                }
+                try {
                   const permission = await Notification.requestPermission();
                   if (permission === "granted") {
-                    alert("Notificações do navegador ativadas!");
+                    showToast("Notificações do navegador ativadas!", "success");
+                  } else {
+                    showToast("Permissão de notificação negada.", "error");
                   }
+                } catch (err) {
+                  console.error("Error requesting notification permission:", err);
+                  showToast("Erro ao solicitar permissão.", "error");
                 }
               }}
               className="p-2 text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 rounded-full transition-all"
@@ -776,9 +880,27 @@ export default function App() {
                     >
                       <div className="p-4 border-b border-zinc-100 flex items-center justify-between bg-zinc-50/50">
                         <h3 className="text-xs font-bold text-zinc-900 uppercase tracking-widest">Notificações</h3>
-                        <span className="text-[10px] font-bold px-2 py-0.5 bg-zinc-200 text-zinc-600 rounded-full">
-                          {notifications.length}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          {("Notification" in window && Notification.permission !== "granted") && (
+                            <button 
+                              onClick={async () => {
+                                try {
+                                  const permission = await Notification.requestPermission();
+                                  if (permission === "granted") showToast("Ativado!", "success");
+                                  else showToast("Negado", "error");
+                                } catch (err) {
+                                  showToast("Erro", "error");
+                                }
+                              }}
+                              className="text-[10px] font-bold text-blue-600 hover:underline"
+                            >
+                              Ativar Desktop
+                            </button>
+                          )}
+                          <span className="text-[10px] font-bold px-2 py-0.5 bg-zinc-200 text-zinc-600 rounded-full">
+                            {notifications.length}
+                          </span>
+                        </div>
                       </div>
                       <div className="max-h-96 overflow-y-auto">
                         {notifications.length > 0 ? (
@@ -843,13 +965,23 @@ export default function App() {
         </header>
 
         <div className="p-8 max-w-7xl mx-auto">
-          {activeTab === 'dashboard' && <Dashboard equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} allPlans={allPlans} searchTerm={searchTerm} />}
+          {activeTab === 'dashboard' && <Dashboard equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} allPlans={allPlans} searchTerm={searchTerm} showToast={showToast} />}
           {activeTab === 'equipment' && <EquipmentSection equipment={equipment} user={user} initialEquipId={initialEquipId} onClearInitialId={() => setInitialEquipId(null)} searchTerm={searchTerm} />}
           {activeTab === 'maintenance' && <MaintenanceSection equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} searchTerm={searchTerm} />}
           {activeTab === 'parts' && <PartsSection equipment={equipment} user={user} searchTerm={searchTerm} />}
           {activeTab === 'reports' && <ReportsSection equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} searchTerm={searchTerm} />}
           {activeTab === 'users' && <UsersSection user={user} searchTerm={searchTerm} />}
         </div>
+
+        <AnimatePresence>
+          {toast && (
+            <Toast 
+              message={toast.message} 
+              type={toast.type} 
+              onClose={() => setToast(null)} 
+            />
+          )}
+        </AnimatePresence>
       </main>
     </div>
   );
@@ -873,8 +1005,9 @@ function NavItem({ active, onClick, icon, label }: any) {
 
 // --- Sections ---
 
-function Dashboard({ equipment, records, user, onDeleteRecord, allPlans, searchTerm }: { equipment: Equipment[], records: MaintenanceRecord[], user: UserProfile, onDeleteRecord: (id: string) => void, allPlans: MaintenancePlan[], searchTerm: string }) {
+function Dashboard({ equipment, records, user, onDeleteRecord, allPlans, searchTerm, showToast }: { equipment: Equipment[], records: MaintenanceRecord[], user: UserProfile, onDeleteRecord: (id: string) => void, allPlans: MaintenancePlan[], searchTerm: string, showToast: (m: string, t?: any) => void }) {
   const activeMaintenances = records.filter(r => r.status === 'in-progress');
+  const [isSending, setIsSending] = useState(false);
   
   // Calculate due maintenances
   const dueMaintenances = equipment.flatMap(equip => {
@@ -887,8 +1020,10 @@ function Dashboard({ equipment, records, user, onDeleteRecord, allPlans, searchT
       const remainingHours = nextMaintenanceHour - (equip.currentHours || 0);
       
       return {
-        equipment,
+        equip,
         equipName: equip.name,
+        equipModel: equip.model,
+        equipSerial: equip.serialNumber,
         planDescription: plan.description,
         remainingHours,
         isDue: remainingHours <= plan.intervalHours * 0.1 || remainingHours <= 10
@@ -901,13 +1036,23 @@ function Dashboard({ equipment, records, user, onDeleteRecord, allPlans, searchT
 
   const handleSendDueAlerts = async () => {
     if (dueMaintenances.length === 0) {
-      alert('Não há manutenções próximas do vencimento no momento.');
+      showToast('Não há manutenções próximas do vencimento no momento.', 'info');
       return;
     }
     
-    const alertMsg = `${dueMaintenances.map(d => `• ${d.equipName}: ${d.planDescription} (${d.remainingHours.toFixed(1)}h restantes)`).join('\n')}`;
-    const sentCount = await sendAlert(alertMsg, '🚨 ALERTA DE VENCIMENTO', 'alert');
-    alert(`Alertas enviados para ${sentCount} usuários registrados.`);
+    setIsSending(true);
+    try {
+      const alertMsg = dueMaintenances.map(d => 
+        `• ${d.equipName} (Mod: ${d.equipModel}, S/N: ${d.equipSerial})\n  Plano: ${d.planDescription}\n  Restante: ${d.remainingHours.toFixed(1)}h`
+      ).join('\n\n');
+      
+      const sentCount = await sendAlert(alertMsg, '🚨 ALERTA DE VENCIMENTO', 'alert');
+      showToast(`Alertas enviados para ${sentCount} usuários registrados.`, 'success');
+    } catch (err) {
+      showToast('Erro ao enviar alertas.', 'error');
+    } finally {
+      setIsSending(false);
+    }
   };
   
   return (
@@ -925,9 +1070,24 @@ function Dashboard({ equipment, records, user, onDeleteRecord, allPlans, searchT
               <AlertCircle size={20} />
               <h3 className="font-bold">Atenção: Vencimentos Próximos</h3>
             </div>
-            <Button variant="danger" size="sm" onClick={handleSendDueAlerts}>
+            <Button variant="danger" size="sm" onClick={handleSendDueAlerts} loading={isSending}>
               <Bell size={14} /> Notificar Responsáveis
             </Button>
+            {user.role === 'admin' && (
+              <Button variant="outline" size="sm" loading={isSending} onClick={async () => {
+                setIsSending(true);
+                try {
+                  const count = await sendAlert('Este é um alerta de teste do sistema GIGA Plan.', '🧪 TESTE DE ALERTA', 'alert');
+                  showToast(`Teste concluído. Alerta enviado para ${count} usuários.`, 'success');
+                } catch (err) {
+                  showToast('Erro no teste de alerta.', 'error');
+                } finally {
+                  setIsSending(false);
+                }
+              }}>
+                Testar Alertas
+              </Button>
+            )}
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {dueMaintenances.map((d, i) => (
@@ -1855,7 +2015,7 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
     await addDoc(collection(db, 'maintenance_records'), data);
     
     // Send Alert
-    const alertMsg = `Equipamento: ${equip.name}\nPlano: ${plan.description}\nIniciada em: ${format(new Date(), 'dd/MM/yyyy HH:mm')}`;
+    const alertMsg = `Equipamento: ${equip.name}\nModelo: ${equip.model}\nSérie: ${equip.serialNumber}\nPlano: ${plan.description}\nIniciada em: ${format(new Date(), 'dd/MM/yyyy HH:mm')}`;
     await sendAlert(alertMsg, '⚠️ NOVA ORDEM DE SERVIÇO', 'new');
 
     setIsModalOpen(false);
@@ -1945,6 +2105,13 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
     await updateDoc(doc(db, 'equipment', completingRecord.equipmentId), {
       currentHours: hourMeter
     });
+
+    // Send Alert
+    const equip = equipment.find(e => e.id === completingRecord.equipmentId);
+    if (equip) {
+      const alertMsg = `Equipamento: ${equip.name}\nModelo: ${equip.model}\nSérie: ${equip.serialNumber}\nPlano: ${completingRecord.planDescription}\nConcluída em: ${format(new Date(), 'dd/MM/yyyy HH:mm')}\nHorímetro: ${hourMeter}h`;
+      await sendAlert(alertMsg, '✅ MANUTENÇÃO CONCLUÍDA', 'maintenance');
+    }
 
     setIsCompleteModalOpen(false);
     setCompletingRecord(null);
