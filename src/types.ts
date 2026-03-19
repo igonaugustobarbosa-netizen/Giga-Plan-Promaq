@@ -34,6 +34,7 @@ export interface MaintenancePlan {
   id: string;
   equipmentId: string;
   description: string;
+  workDescription?: string;
   intervalHours: number;
   partsRequired: {
     partId: string;

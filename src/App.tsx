@@ -61,7 +61,8 @@ import {
   Printer,
   Menu,
   X,
-  MessageCircle
+  MessageCircle,
+  RotateCcw
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -477,11 +478,10 @@ export default function App() {
     if (isNew && latest.creatorUid !== user.uid && !latest.readBy?.includes(user.uid)) {
       showToast(`${latest.title}`, 'info');
     }
-  }, [notifications, user]);
-
-  const generateServiceOrderPDF = (record: MaintenanceRecord) => {
+  }, [notifications, user]);  const generateServiceOrderPDF = (record: MaintenanceRecord) => {
     const doc = new jsPDF();
     const equip = equipment.find(e => e.id === record.equipmentId);
+    const plan = allPlans.find(p => p.id === record.planId);
     const isOperator = user?.role === 'operator';
 
     // Header
@@ -510,14 +510,30 @@ export default function App() {
     doc.text(`Plano: ${record.planDescription}`, 14, 82);
     doc.text(`Status: ${record.status === 'in-progress' ? 'Em Andamento' : record.status === 'completed' ? 'Concluída' : 'Programada'}`, 14, 87);
     doc.text(`Data de Início: ${format(parseISO(record.startDate), 'dd/MM/yyyy HH:mm')}`, 14, 92);
+    
+    let currentY = 97;
     if (record.scheduledStartDate) {
-      doc.text(`Programado para: ${format(parseISO(record.scheduledStartDate + 'T00:00:00'), 'dd/MM/yyyy')}`, 14, 97);
+      doc.text(`Programado para: ${format(parseISO(record.scheduledStartDate + 'T00:00:00'), 'dd/MM/yyyy')}`, 14, currentY);
+      currentY += 7;
+    }
+
+    // Work Description from Plan
+    if (plan?.workDescription) {
+      currentY += 5;
+      doc.setFontSize(14);
+      doc.text('Trabalhos a serem Realizados', 14, currentY);
+      doc.setFontSize(10);
+      const splitWork = doc.splitTextToSize(plan.workDescription, 180);
+      doc.text(splitWork, 14, currentY + 7);
+      currentY += 10 + (splitWork.length * 5);
+    } else {
+      currentY += 5;
     }
 
     // Parts
     if (record.usedParts && record.usedParts.length > 0) {
       doc.setFontSize(14);
-      doc.text('Peças Utilizadas', 14, 110);
+      doc.text('Peças Utilizadas', 14, currentY);
       
       const partsHead = isOperator 
         ? [['Peça', 'Quantidade']]
@@ -530,36 +546,37 @@ export default function App() {
       });
 
       autoTable(doc, {
-        startY: 115,
+        startY: currentY + 5,
         head: partsHead,
         body: partsBody,
         theme: 'striped',
         headStyles: { fillColor: [0, 0, 0] },
         styles: { fontSize: 8 }
       });
+      currentY = (doc as any).lastAutoTable.finalY + 15;
+    } else {
+      currentY += 10;
     }
 
     // Costs Summary
     if (!isOperator) {
-      const finalY = (doc as any).lastAutoTable?.finalY || 115;
       doc.setFontSize(14);
-      doc.text('Resumo de Custos', 14, finalY + 15);
+      doc.text('Resumo de Custos', 14, currentY);
       doc.setFontSize(10);
-      doc.text(`Custo de Peças: R$ ${(record.totalPartsCost || 0).toFixed(2)}`, 14, finalY + 22);
-      doc.text(`Custo de Mão de Obra: R$ ${(record.totalLaborCost || 0).toFixed(2)}`, 14, finalY + 27);
+      doc.text(`Custo de Peças: R$ ${(record.totalPartsCost || 0).toFixed(2)}`, 14, currentY + 7);
+      doc.text(`Custo de Mão de Obra: R$ ${(record.totalLaborCost || 0).toFixed(2)}`, 14, currentY + 12);
       doc.setFontSize(12);
-      doc.text(`TOTAL GERAL: R$ ${((record.totalPartsCost || 0) + (record.totalLaborCost || 0)).toFixed(2)}`, 14, finalY + 35);
+      doc.text(`TOTAL GERAL: R$ ${((record.totalPartsCost || 0) + (record.totalLaborCost || 0)).toFixed(2)}`, 14, currentY + 20);
+      currentY += 30;
     }
 
     // Notes
     if (record.notes) {
-      const finalY = (doc as any).lastAutoTable?.finalY || 115;
-      const notesY = !isOperator ? finalY + 45 : finalY + 15;
       doc.setFontSize(14);
-      doc.text('Observações Técnicas', 14, notesY);
+      doc.text('Observações Técnicas', 14, currentY);
       doc.setFontSize(10);
       const splitNotes = doc.splitTextToSize(record.notes, 180);
-      doc.text(splitNotes, 14, notesY + 7);
+      doc.text(splitNotes, 14, currentY + 7);
     }
 
     // Footer
@@ -1816,6 +1833,7 @@ function PlansList({ equipment, user, showToast, setConfirmModal }: { equipment:
   const [parts, setParts] = useState<Part[]>([]);
   const [lastRecords, setLastRecords] = useState<Record<string, MaintenanceRecord>>({});
   const [isAdding, setIsAdding] = useState(false);
+  const [editingPlan, setEditingPlan] = useState<MaintenancePlan | null>(null);
   const [selectedParts, setSelectedParts] = useState<{ partId: string, quantity: number }[]>([]);
 
   useEffect(() => {
@@ -1869,15 +1887,23 @@ function PlansList({ equipment, user, showToast, setConfirmModal }: { equipment:
     const data = {
       equipmentId,
       description: formData.get('description') as string,
+      workDescription: formData.get('workDescription') as string,
       intervalHours: Number(formData.get('intervalHours')),
       partsRequired: selectedParts.filter(p => p.quantity > 0)
     };
     try {
-      await addDoc(collection(db, 'equipment', equipmentId, 'plans'), data);
+      if (editingPlan) {
+        await updateDoc(doc(db, 'equipment', equipmentId, 'plans', editingPlan.id), data);
+        showToast("Plano atualizado com sucesso.", "success");
+      } else {
+        await addDoc(collection(db, 'equipment', equipmentId, 'plans'), data);
+        showToast("Plano adicionado com sucesso.", "success");
+      }
       setIsAdding(false);
+      setEditingPlan(null);
       setSelectedParts([]);
     } catch (error) {
-      console.error("Erro ao adicionar plano:", error);
+      console.error("Erro ao salvar plano:", error);
       showToast("Erro ao salvar o plano. Verifique os campos e tente novamente.", "error");
     }
   };
@@ -1899,33 +1925,67 @@ function PlansList({ equipment, user, showToast, setConfirmModal }: { equipment:
       <div className="flex items-center justify-between">
         <h5 className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Planos de Manutenção</h5>
         {user.role !== 'operator' && (
-          <button onClick={() => setIsAdding(true)} className="text-xs font-bold text-black hover:underline flex items-center gap-1">
+          <button 
+            onClick={() => {
+              setIsAdding(true);
+              setEditingPlan(null);
+              setSelectedParts([]);
+            }} 
+            className="text-xs font-bold text-black hover:underline flex items-center gap-1"
+          >
             <Plus size={12} /> Novo Plano
           </button>
         )}
       </div>
 
-      {isAdding && (
+      {(isAdding || editingPlan) && (
         <form onSubmit={handleAddPlan} className="p-4 bg-zinc-50 rounded-xl space-y-4 border border-zinc-200">
-          <Input label="Descrição da Manutenção" name="description" placeholder="Ex: Revisão de 500h" required />
-          <Input label="Intervalo (Horas)" name="intervalHours" type="number" placeholder="500" required />
+          <Input 
+            label="Descrição da Manutenção" 
+            name="description" 
+            placeholder="Ex: Revisão de 500h" 
+            defaultValue={editingPlan?.description || ''}
+            required 
+          />
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Trabalhos a serem Realizados</label>
+            <textarea 
+              name="workDescription" 
+              placeholder="Descreva detalhadamente os itens a serem revisados..."
+              rows={3}
+              defaultValue={editingPlan?.workDescription || ''}
+              className="w-full px-4 py-2.5 bg-white border border-zinc-200 rounded-xl text-sm font-bold text-zinc-700 focus:outline-none focus:ring-4 focus:ring-zinc-100 focus:border-zinc-400 transition-all shadow-sm"
+            />
+          </div>
+          <Input 
+            label="Intervalo (Horas)" 
+            name="intervalHours" 
+            type="number" 
+            placeholder="500" 
+            defaultValue={editingPlan?.intervalHours || ''}
+            required 
+          />
           
           <div className="space-y-2">
             <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Peças Necessárias para este Plano</p>
             {parts.length > 0 ? (
               <div className="grid grid-cols-1 gap-2 max-h-40 overflow-y-auto pr-2">
-                {parts.map(part => (
-                  <div key={part.id} className="flex items-center justify-between p-2 bg-white rounded-lg border border-zinc-100">
-                    <span className="text-xs font-medium">{part.name}</span>
-                    <input 
-                      type="number" 
-                      min="0"
-                      placeholder="Qtd"
-                      className="w-16 px-2 py-1 text-xs border border-zinc-200 rounded"
-                      onChange={(e) => handlePartToggle(part.id, Number(e.target.value))}
-                    />
-                  </div>
-                ))}
+                {parts.map(part => {
+                  const existingPart = selectedParts.find(p => p.partId === part.id);
+                  return (
+                    <div key={part.id} className="flex items-center justify-between p-2 bg-white rounded-lg border border-zinc-100">
+                      <span className="text-xs font-medium">{part.name}</span>
+                      <input 
+                        type="number" 
+                        min="0"
+                        placeholder="Qtd"
+                        defaultValue={existingPart?.quantity || ''}
+                        className="w-16 px-2 py-1 text-xs border border-zinc-200 rounded"
+                        onChange={(e) => handlePartToggle(part.id, Number(e.target.value))}
+                      />
+                    </div>
+                  );
+                })}
               </div>
             ) : (
               <p className="text-[10px] text-zinc-400 italic">Cadastre peças primeiro para selecioná-las no plano.</p>
@@ -1933,8 +1993,19 @@ function PlansList({ equipment, user, showToast, setConfirmModal }: { equipment:
           </div>
 
           <div className="flex justify-end gap-2 pt-2">
-            <Button variant="ghost" className="text-xs" onClick={() => setIsAdding(false)}>Cancelar</Button>
-            <Button type="submit" className="text-xs">Salvar Plano</Button>
+            <Button 
+              variant="ghost" 
+              className="text-xs" 
+              onClick={() => {
+                setIsAdding(false);
+                setEditingPlan(null);
+              }}
+            >
+              Cancelar
+            </Button>
+            <Button type="submit" className="text-xs">
+              {editingPlan ? 'Atualizar Plano' : 'Salvar Plano'}
+            </Button>
           </div>
         </form>
       )}
@@ -1957,27 +2028,45 @@ function PlansList({ equipment, user, showToast, setConfirmModal }: { equipment:
                     </p>
                   )}
                 </div>
+                {plan.workDescription && (
+                  <p className="text-xs text-zinc-600 mt-2 bg-white/50 p-2 rounded-lg border border-zinc-100 italic">
+                    {plan.workDescription}
+                  </p>
+                )}
               </div>
-              <button 
-                onClick={async () => {
-                  setConfirmModal({
-                    isOpen: true,
-                    title: 'Excluir Plano',
-                    message: 'Deseja excluir este plano?',
-                    onConfirm: async () => {
-                      try {
-                        await deleteDoc(doc(db, 'equipment', equipmentId, 'plans', plan.id));
-                        showToast('Plano excluído com sucesso.', 'success');
-                      } catch (err) {
-                        showToast('Erro ao excluir plano.', 'error');
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => {
+                    setEditingPlan(plan);
+                    setSelectedParts(plan.partsRequired || []);
+                    setIsAdding(false);
+                  }}
+                  className="text-zinc-300 hover:text-blue-500 transition-colors"
+                  title="Editar Plano"
+                >
+                  <Edit3 size={14} />
+                </button>
+                <button 
+                  onClick={async () => {
+                    setConfirmModal({
+                      isOpen: true,
+                      title: 'Excluir Plano',
+                      message: 'Deseja excluir este plano?',
+                      onConfirm: async () => {
+                        try {
+                          await deleteDoc(doc(db, 'equipment', equipmentId, 'plans', plan.id));
+                          showToast('Plano excluído com sucesso.', 'success');
+                        } catch (err) {
+                          showToast('Erro ao excluir plano.', 'error');
+                        }
                       }
-                    }
-                  });
-                }}
-                className="text-zinc-300 hover:text-red-500 transition-colors"
-              >
-                <Trash2 size={14} />
-              </button>
+                    });
+                  }}
+                  className="text-zinc-300 hover:text-red-500 transition-colors"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
             </div>
             {plan.partsRequired && plan.partsRequired.length > 0 && (
               <div className="mt-3 pt-3 border-t border-zinc-200/50">
@@ -2212,6 +2301,12 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
     setCompletingRecord(null);
   };
 
+  const handleRepeatMaintenance = (record: MaintenanceRecord) => {
+    setSelectedEquipId(record.equipmentId);
+    setSelectedPlanId(record.planId);
+    setIsModalOpen(true);
+  };
+
   const filteredRecords = records.filter(record => {
     const matchesStatus = statusFilter === 'all' || record.status === statusFilter;
     const matchesEquip = !qrEquipId || record.equipmentId === qrEquipId;
@@ -2319,6 +2414,15 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
                   >
                     <FileText size={18} />
                   </button>
+                  {record.status === 'completed' && (
+                    <button 
+                      onClick={() => handleRepeatMaintenance(record)}
+                      className="p-2 text-zinc-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"
+                      title="Repetir Manutenção"
+                    >
+                      <RotateCcw size={18} />
+                    </button>
+                  )}
                   {record.status === 'in-progress' && (
                     <div className="flex items-center gap-2">
                       <Button variant="outline" onClick={() => openEditModal(record)}>
