@@ -259,6 +259,7 @@ export default function App() {
   const [searchTerm, setSearchTerm] = useState('');
   const [allPlans, setAllPlans] = useState<MaintenancePlan[]>([]);
   const [initialEquipId, setInitialEquipId] = useState<string | null>(null);
+  const [qrEquipId, setQrEquipId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' | 'info' } | null>(null);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
@@ -477,6 +478,104 @@ export default function App() {
       showToast(`${latest.title}`, 'info');
     }
   }, [notifications, user]);
+
+  const generateServiceOrderPDF = (record: MaintenanceRecord) => {
+    const doc = new jsPDF();
+    const equip = equipment.find(e => e.id === record.equipmentId);
+    const isOperator = user?.role === 'operator';
+
+    // Header
+    doc.setFontSize(22);
+    doc.setTextColor(40);
+    doc.text('GIGA Plan Promaq - Ordem de Serviço', 14, 22);
+    
+    doc.setFontSize(10);
+    doc.setTextColor(100);
+    doc.text(`OS ID: ${record.id}`, 14, 30);
+    doc.text(`Gerado em: ${format(new Date(), 'dd/MM/yyyy HH:mm')}`, 14, 35);
+
+    // Equipment Info
+    doc.setFontSize(14);
+    doc.setTextColor(0);
+    doc.text('Informações do Equipamento', 14, 45);
+    doc.setFontSize(10);
+    doc.text(`Nome: ${record.equipmentName}`, 14, 52);
+    doc.text(`Modelo: ${equip?.model || 'N/A'}`, 14, 57);
+    doc.text(`Série: ${equip?.serialNumber || 'N/A'}`, 14, 62);
+
+    // Maintenance Info
+    doc.setFontSize(14);
+    doc.text('Detalhes da Manutenção', 14, 75);
+    doc.setFontSize(10);
+    doc.text(`Plano: ${record.planDescription}`, 14, 82);
+    doc.text(`Status: ${record.status === 'in-progress' ? 'Em Andamento' : record.status === 'completed' ? 'Concluída' : 'Programada'}`, 14, 87);
+    doc.text(`Data de Início: ${format(parseISO(record.startDate), 'dd/MM/yyyy HH:mm')}`, 14, 92);
+    if (record.scheduledStartDate) {
+      doc.text(`Programado para: ${format(parseISO(record.scheduledStartDate + 'T00:00:00'), 'dd/MM/yyyy')}`, 14, 97);
+    }
+
+    // Parts
+    if (record.usedParts && record.usedParts.length > 0) {
+      doc.setFontSize(14);
+      doc.text('Peças Utilizadas', 14, 110);
+      
+      const partsHead = isOperator 
+        ? [['Peça', 'Quantidade']]
+        : [['Peça', 'Quantidade', 'Custo Unit.', 'Total']];
+      
+      const partsBody = record.usedParts.map(p => {
+        const base = [p.name, p.quantity.toString()];
+        if (isOperator) return base;
+        return [...base, `R$ ${p.unitCost.toFixed(2)}`, `R$ ${(p.unitCost * p.quantity).toFixed(2)}` ];
+      });
+
+      autoTable(doc, {
+        startY: 115,
+        head: partsHead,
+        body: partsBody,
+        theme: 'striped',
+        headStyles: { fillColor: [0, 0, 0] },
+        styles: { fontSize: 8 }
+      });
+    }
+
+    // Costs Summary
+    if (!isOperator) {
+      const finalY = (doc as any).lastAutoTable?.finalY || 115;
+      doc.setFontSize(14);
+      doc.text('Resumo de Custos', 14, finalY + 15);
+      doc.setFontSize(10);
+      doc.text(`Custo de Peças: R$ ${(record.totalPartsCost || 0).toFixed(2)}`, 14, finalY + 22);
+      doc.text(`Custo de Mão de Obra: R$ ${(record.totalLaborCost || 0).toFixed(2)}`, 14, finalY + 27);
+      doc.setFontSize(12);
+      doc.text(`TOTAL GERAL: R$ ${((record.totalPartsCost || 0) + (record.totalLaborCost || 0)).toFixed(2)}`, 14, finalY + 35);
+    }
+
+    // Notes
+    if (record.notes) {
+      const finalY = (doc as any).lastAutoTable?.finalY || 115;
+      const notesY = !isOperator ? finalY + 45 : finalY + 15;
+      doc.setFontSize(14);
+      doc.text('Observações Técnicas', 14, notesY);
+      doc.setFontSize(10);
+      const splitNotes = doc.splitTextToSize(record.notes, 180);
+      doc.text(splitNotes, 14, notesY + 7);
+    }
+
+    // Footer
+    const pageCount = doc.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFontSize(8);
+      doc.setTextColor(150);
+      const footerText = 'Desenvolvedor: Giga Elétrica | Contato: 43 996118806 | Joaquim Távora - PR';
+      const pageSize = doc.internal.pageSize;
+      const pageHeight = pageSize.height ? pageSize.height : pageSize.getHeight();
+      doc.text(footerText, 14, pageHeight - 10);
+    }
+
+    doc.save(`OS-${record.id}-${record.equipmentName}.pdf`);
+  };
 
   const handleGoogleLogin = async () => {
     setAuthError('');
@@ -879,9 +978,9 @@ export default function App() {
         </header>
 
         <div className="p-8 max-w-7xl mx-auto">
-          {activeTab === 'dashboard' && <Dashboard equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} allPlans={allPlans} searchTerm={searchTerm} showToast={showToast} notifications={notifications} />}
-          {activeTab === 'equipment' && <EquipmentSection equipment={equipment} user={user} initialEquipId={initialEquipId} onClearInitialId={() => setInitialEquipId(null)} searchTerm={searchTerm} showToast={showToast} setConfirmModal={setConfirmModal} sendAlert={sendAlert} />}
-          {activeTab === 'maintenance' && <MaintenanceSection equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} searchTerm={searchTerm} sendAlert={sendAlert} />}
+          {activeTab === 'dashboard' && <Dashboard equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} allPlans={allPlans} searchTerm={searchTerm} showToast={showToast} notifications={notifications} onGeneratePDF={generateServiceOrderPDF} />}
+          {activeTab === 'equipment' && <EquipmentSection equipment={equipment} records={maintenanceRecords} user={user} initialEquipId={initialEquipId} onClearInitialId={() => setInitialEquipId(null)} searchTerm={searchTerm} showToast={showToast} setConfirmModal={setConfirmModal} sendAlert={sendAlert} onGeneratePDF={generateServiceOrderPDF} />}
+          {activeTab === 'maintenance' && <MaintenanceSection equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} searchTerm={searchTerm} sendAlert={sendAlert} onGeneratePDF={generateServiceOrderPDF} qrEquipId={qrEquipId} onClearQrFilter={() => setQrEquipId(null)} />}
           {activeTab === 'parts' && <PartsSection equipment={equipment} user={user} searchTerm={searchTerm} />}
           {activeTab === 'reports' && <ReportsSection equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} searchTerm={searchTerm} />}
           {activeTab === 'users' && <UsersSection user={user} searchTerm={searchTerm} showToast={showToast} setConfirmModal={setConfirmModal} sendAlert={sendAlert} />}
@@ -929,7 +1028,7 @@ function NavItem({ active, onClick, icon, label }: any) {
 
 // --- Sections ---
 
-function Dashboard({ equipment, records, user, onDeleteRecord, allPlans, searchTerm, showToast, notifications }: { equipment: Equipment[], records: MaintenanceRecord[], user: UserProfile, onDeleteRecord: (id: string) => void, allPlans: MaintenancePlan[], searchTerm: string, showToast: (m: string, t?: any) => void, notifications: AppNotification[] }) {
+function Dashboard({ equipment, records, user, onDeleteRecord, allPlans, searchTerm, showToast, notifications, onGeneratePDF }: { equipment: Equipment[], records: MaintenanceRecord[], user: UserProfile, onDeleteRecord: (id: string) => void, allPlans: MaintenancePlan[], searchTerm: string, showToast: (m: string, t?: any) => void, notifications: AppNotification[], onGeneratePDF: (r: MaintenanceRecord) => void }) {
   const activeMaintenances = records.filter(r => r.status === 'in-progress');
   
   // Calculate due maintenances
@@ -1014,29 +1113,38 @@ function Dashboard({ equipment, records, user, onDeleteRecord, allPlans, searchT
                   <p className="font-bold text-zinc-900 truncate">{record.equipmentName}</p>
                   <p className="text-xs text-orange-600 font-medium truncate">{record.planDescription}</p>
                 </div>
-                <div className="text-right flex items-center gap-3 shrink-0">
-                  <div className="flex gap-4">
-                    <div className="text-right">
-                      <p className="text-[10px] font-bold text-zinc-400 uppercase">Programado</p>
-                      <p className="text-sm font-bold text-zinc-600">
-                        {record.scheduledStartDate ? format(parseISO(record.scheduledStartDate + 'T00:00:00'), 'dd/MM/yyyy') : '--/--/----'}
-                      </p>
+                  <div className="text-right flex items-center gap-3 shrink-0">
+                    <div className="flex gap-4">
+                      <div className="text-right">
+                        <p className="text-[10px] font-bold text-zinc-400 uppercase">Programado</p>
+                        <p className="text-sm font-bold text-zinc-600">
+                          {record.scheduledStartDate ? format(parseISO(record.scheduledStartDate + 'T00:00:00'), 'dd/MM/yyyy') : '--/--/----'}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[10px] font-bold text-zinc-400 uppercase">Início</p>
+                        <p className="text-sm font-bold">{format(parseISO(record.startDate), 'HH:mm')}</p>
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <p className="text-[10px] font-bold text-zinc-400 uppercase">Início</p>
-                      <p className="text-sm font-bold">{format(parseISO(record.startDate), 'HH:mm')}</p>
+                    <div className="flex items-center gap-2 ml-2">
+                      <button 
+                        onClick={() => onGeneratePDF(record)}
+                        className="p-2 text-zinc-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                        title="Gerar PDF Ordem de Serviço"
+                      >
+                        <FileText size={18} />
+                      </button>
+                      {user.role !== 'operator' && (
+                        <button 
+                          onClick={() => onDeleteRecord(record.id)}
+                          className="p-2 text-zinc-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
+                          title="Excluir Manutenção"
+                        >
+                          <Trash2 size={18} />
+                        </button>
+                      )}
                     </div>
                   </div>
-                  {user.role !== 'operator' && (
-                    <button 
-                      onClick={() => onDeleteRecord(record.id)}
-                      className="text-zinc-300 hover:text-red-500 transition-colors ml-2"
-                      title="Excluir Manutenção"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  )}
-                </div>
               </div>
             )) : (
               <div className="py-12 text-center text-zinc-400">
@@ -1122,7 +1230,7 @@ function StatCard({ label, value, icon }: any) {
   );
 }
 
-function EquipmentSection({ equipment, user, initialEquipId, onClearInitialId, searchTerm, showToast, setConfirmModal, sendAlert }: { equipment: Equipment[], user: UserProfile, initialEquipId?: string | null, onClearInitialId?: () => void, searchTerm: string, showToast: (m: string, t?: any) => void, setConfirmModal: any, sendAlert: any }) {
+function EquipmentSection({ equipment, records, user, initialEquipId, onClearInitialId, searchTerm, showToast, setConfirmModal, sendAlert, onGeneratePDF }: { equipment: Equipment[], records: MaintenanceRecord[], user: UserProfile, initialEquipId?: string | null, onClearInitialId?: () => void, searchTerm: string, showToast: (m: string, t?: any) => void, setConfirmModal: any, sendAlert: any, onGeneratePDF: (r: MaintenanceRecord) => void }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<Equipment | null>(null);
   const [viewingItem, setViewingItem] = useState<Equipment | null>(null);
@@ -1592,6 +1700,33 @@ function EquipmentSection({ equipment, user, initialEquipId, onClearInitialId, s
                 {viewingItem.technicalInfo || 'Nenhuma informação técnica.'}
               </div>
             </div>
+
+            {/* Ongoing Maintenance Section */}
+            {records.filter(r => r.equipmentId === viewingItem.id && r.status === 'in-progress').length > 0 && (
+              <div className="space-y-4 border-t border-zinc-100 pt-6">
+                <h5 className="text-xs font-bold text-orange-600 uppercase tracking-widest flex items-center gap-2">
+                  <Clock size={14} /> Manutenção em Andamento
+                </h5>
+                <div className="space-y-3">
+                  {records.filter(r => r.equipmentId === viewingItem.id && r.status === 'in-progress').map(record => (
+                    <div key={record.id} className="p-4 bg-orange-50 border border-orange-100 rounded-xl flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-bold text-orange-900">{record.planDescription}</p>
+                        <p className="text-[10px] text-orange-700">Iniciado em: {format(parseISO(record.startDate), 'dd/MM/yyyy HH:mm')}</p>
+                      </div>
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        className="bg-white border-orange-200 text-orange-600 hover:bg-orange-100"
+                        onClick={() => onGeneratePDF(record)}
+                      >
+                        <FileText size={14} /> PDF
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             
             <PartsList equipmentId={viewingItem.id} equipmentName={viewingItem.name} user={user} searchTerm={searchTerm} />
             <PlansList equipment={viewingItem} user={user} showToast={showToast} setConfirmModal={setConfirmModal} />
@@ -1870,19 +2005,26 @@ function PlansList({ equipment, user, showToast, setConfirmModal }: { equipment:
   );
 }
 
-function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTerm, sendAlert }: { equipment: Equipment[], records: MaintenanceRecord[], user: UserProfile, onDeleteRecord: (id: string) => void, searchTerm: string, sendAlert: any }) {
+function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTerm, sendAlert, onGeneratePDF, qrEquipId, onClearQrFilter }: { equipment: Equipment[], records: MaintenanceRecord[], user: UserProfile, onDeleteRecord: (id: string) => void, searchTerm: string, sendAlert: any, onGeneratePDF: (r: MaintenanceRecord) => void, qrEquipId?: string | null, onClearQrFilter?: () => void }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isCompleteModalOpen, setIsCompleteModalOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<MaintenanceRecord | null>(null);
   const [completingRecord, setCompletingRecord] = useState<MaintenanceRecord | null>(null);
-  const [selectedEquipId, setSelectedEquipId] = useState('');
+  const [selectedEquipId, setSelectedEquipId] = useState(qrEquipId || '');
   const [selectedPlanId, setSelectedPlanId] = useState('');
   const [plans, setPlans] = useState<MaintenancePlan[]>([]);
   const [equipmentParts, setEquipmentParts] = useState<Part[]>([]);
   const [selectedParts, setSelectedParts] = useState<{ partId: string, quantity: number }[]>([]);
   const [calculatedStartDate, setCalculatedStartDate] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'planned' | 'in-progress' | 'completed'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'planned' | 'in-progress' | 'completed'>(qrEquipId ? 'in-progress' : 'all');
+
+  useEffect(() => {
+    if (qrEquipId) {
+      setSelectedEquipId(qrEquipId);
+      setStatusFilter('in-progress');
+    }
+  }, [qrEquipId]);
 
   useEffect(() => {
     if (selectedEquipId) {
@@ -2072,15 +2214,35 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
 
   const filteredRecords = records.filter(record => {
     const matchesStatus = statusFilter === 'all' || record.status === statusFilter;
+    const matchesEquip = !qrEquipId || record.equipmentId === qrEquipId;
     const matchesSearch = 
       (record.equipmentName && record.equipmentName.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (record.planDescription && record.planDescription.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (record.notes && record.notes.toLowerCase().includes(searchTerm.toLowerCase()));
-    return matchesStatus && matchesSearch;
+    return matchesStatus && matchesSearch && matchesEquip;
   });
 
   return (
     <div className="space-y-6">
+      {qrEquipId && (
+        <div className="p-4 bg-blue-50 border border-blue-100 rounded-2xl flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
+              <QrCode size={20} />
+            </div>
+            <div>
+              <p className="text-sm font-bold text-blue-900">Filtrado por QR Code</p>
+              <p className="text-xs text-blue-700">Mostrando ordens abertas para: <strong>{equipment.find(e => e.id === qrEquipId)?.name}</strong></p>
+            </div>
+          </div>
+          <button 
+            onClick={onClearQrFilter}
+            className="px-4 py-2 bg-white text-blue-600 border border-blue-200 rounded-xl text-xs font-bold hover:bg-blue-50 transition-all"
+          >
+            Limpar Filtro
+          </button>
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-2xl font-bold text-zinc-900">Controle de Manutenções</h3>
@@ -2149,25 +2311,34 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
                     )}
                   </div>
                 </div>
-                {record.status === 'in-progress' && (
-                  <div className="flex items-center gap-2">
-                    <Button variant="outline" onClick={() => openEditModal(record)}>
-                      <Edit3 size={18} /> Editar
-                    </Button>
-                    <Button variant="primary" onClick={() => handleUpdateStatus(record, 'completed')}>
-                      <StopCircle size={18} /> Finalizar
-                    </Button>
-                  </div>
-                )}
-                {user.role !== 'operator' && (
+                <div className="flex items-center gap-2">
                   <button 
-                    onClick={() => onDeleteRecord(record.id)}
-                    className="p-2 text-zinc-300 hover:text-red-500 transition-colors"
-                    title="Excluir Manutenção"
+                    onClick={() => onGeneratePDF(record)}
+                    className="p-2 text-zinc-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                    title="Gerar PDF Ordem de Serviço"
                   >
-                    <Trash2 size={18} />
+                    <FileText size={18} />
                   </button>
-                )}
+                  {record.status === 'in-progress' && (
+                    <div className="flex items-center gap-2">
+                      <Button variant="outline" onClick={() => openEditModal(record)}>
+                        <Edit3 size={18} /> Editar
+                      </Button>
+                      <Button variant="primary" onClick={() => handleUpdateStatus(record, 'completed')}>
+                        <StopCircle size={18} /> Finalizar
+                      </Button>
+                    </div>
+                  )}
+                  {user.role !== 'operator' && (
+                    <button 
+                      onClick={() => onDeleteRecord(record.id)}
+                      className="p-2 text-zinc-300 hover:text-red-500 transition-colors"
+                      title="Excluir Manutenção"
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </Card>
