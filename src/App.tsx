@@ -338,12 +338,21 @@ export default function App() {
         const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
         if (userDoc.exists()) {
           const userData = userDoc.data() as UserProfile;
+          // Update username for Igon if necessary
+          if (firebaseUser.email === 'igonaugustobarbosa@gmail.com' && userData.username !== 'igon') {
+            userData.username = 'igon';
+            try {
+              await updateDoc(doc(db, 'users', firebaseUser.uid), { username: 'igon' });
+            } catch (err) {
+              console.error('Error updating Igon username:', err);
+            }
+          }
           setUser(userData);
           localStorage.setItem('giga_plan_user', JSON.stringify(userData));
         } else {
           const newUser: UserProfile = {
             uid: firebaseUser.uid,
-            username: firebaseUser.email || '',
+            username: firebaseUser.email === 'igonaugustobarbosa@gmail.com' ? 'igon' : (firebaseUser.email || ''),
             name: firebaseUser.displayName || 'Usuário',
             role: firebaseUser.email === 'igonaugustobarbosa@gmail.com' ? 'admin' : 'operator'
           };
@@ -503,6 +512,18 @@ export default function App() {
     doc.text(`Modelo: ${equip?.model || 'N/A'}`, 14, 57);
     doc.text(`Série: ${equip?.serialNumber || 'N/A'}`, 14, 62);
 
+    // Add Equipment Image if available
+    if (equip?.photoUrl) {
+      try {
+        // Try to add the image. If it's a URL it might fail depending on jsPDF version/config, 
+        // but if it's base64 (common in this app) it works perfectly.
+        const format = equip.photoUrl.includes('png') ? 'PNG' : 'JPEG';
+        doc.addImage(equip.photoUrl, format, 140, 35, 50, 35);
+      } catch (e) {
+        console.warn('Could not add equipment image to PDF:', e);
+      }
+    }
+
     // Maintenance Info
     doc.setFontSize(14);
     doc.text('Detalhes da Manutenção', 14, 75);
@@ -609,6 +630,10 @@ export default function App() {
   };
 
   const handleDeleteMaintenance = async (id: string) => {
+    if (user?.role === 'supervisor') {
+      showToast("Supervisores não têm permissão para excluir registros de manutenção.", "error");
+      return;
+    }
     setConfirmModal({
       isOpen: true,
       title: 'Excluir Registro',
@@ -632,7 +657,7 @@ export default function App() {
     const mockUser: UserProfile = {
       uid: `test-${role}`,
       username: `test-${role}`,
-      name: `Usuário Teste (${role === 'admin' ? 'Admin' : role === 'supervisor' ? 'Supervisor' : 'Operador'})`,
+      name: `Usuário Teste (${role === 'admin' ? 'Admin' : role === 'supervisor' ? 'Supervisor' : role === 'gestor' ? 'Gestor' : 'Operador'})`,
       role: role
     };
     setUser(mockUser);
@@ -656,6 +681,18 @@ export default function App() {
       };
       setUser(adminUser);
       localStorage.setItem('giga_plan_user', JSON.stringify(adminUser));
+      return;
+    }
+
+    if (username === 'gestor' && password === 'gestor2026') {
+      const gestorUser: UserProfile = {
+        uid: 'local-gestor',
+        username: 'gestor',
+        name: 'Gestor GIGA',
+        role: 'gestor'
+      };
+      setUser(gestorUser);
+      localStorage.setItem('giga_plan_user', JSON.stringify(gestorUser));
       return;
     }
 
@@ -755,7 +792,7 @@ export default function App() {
               Entrar no Sistema
             </Button>
             <p className="text-[10px] text-zinc-400 text-center italic">
-              Dica: Usuário "administrador" e senha "123456"
+              Dica: "administrador" (123456) ou "gestor" (gestor2026)
             </p>
           </form>
 
@@ -851,7 +888,7 @@ export default function App() {
             icon={<FileText size={20} />} 
             label="Relatórios" 
           />
-          {user.role === 'admin' && (
+          {(user.role === 'admin' || user.role === 'gestor') && (
             <NavItem 
               active={activeTab === 'users'} 
               onClick={() => { setActiveTab('users'); setIsSidebarOpen(false); }} 
@@ -1151,7 +1188,7 @@ function Dashboard({ equipment, records, user, onDeleteRecord, allPlans, searchT
                       >
                         <FileText size={18} />
                       </button>
-                      {user.role !== 'operator' && (
+                      {user.role !== 'operator' && user.role !== 'supervisor' && (
                         <button 
                           onClick={() => onDeleteRecord(record.id)}
                           className="p-2 text-zinc-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
@@ -1883,6 +1920,10 @@ function PlansList({ equipment, user, showToast, setConfirmModal }: { equipment:
 
   const handleAddPlan = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (user.role === 'operator') {
+      showToast("Você não tem permissão para realizar esta ação.", "error");
+      return;
+    }
     const formData = new FormData(e.currentTarget);
     const data = {
       equipmentId,
@@ -2034,39 +2075,41 @@ function PlansList({ equipment, user, showToast, setConfirmModal }: { equipment:
                   </p>
                 )}
               </div>
-              <div className="flex items-center gap-2">
-                <button 
-                  onClick={() => {
-                    setEditingPlan(plan);
-                    setSelectedParts(plan.partsRequired || []);
-                    setIsAdding(false);
-                  }}
-                  className="text-zinc-300 hover:text-blue-500 transition-colors"
-                  title="Editar Plano"
-                >
-                  <Edit3 size={14} />
-                </button>
-                <button 
-                  onClick={async () => {
-                    setConfirmModal({
-                      isOpen: true,
-                      title: 'Excluir Plano',
-                      message: 'Deseja excluir este plano?',
-                      onConfirm: async () => {
-                        try {
-                          await deleteDoc(doc(db, 'equipment', equipmentId, 'plans', plan.id));
-                          showToast('Plano excluído com sucesso.', 'success');
-                        } catch (err) {
-                          showToast('Erro ao excluir plano.', 'error');
+              {user.role !== 'operator' && (
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => {
+                      setEditingPlan(plan);
+                      setSelectedParts(plan.partsRequired || []);
+                      setIsAdding(false);
+                    }}
+                    className="text-zinc-300 hover:text-blue-500 transition-colors"
+                    title="Editar Plano"
+                  >
+                    <Edit3 size={14} />
+                  </button>
+                  <button 
+                    onClick={async () => {
+                      setConfirmModal({
+                        isOpen: true,
+                        title: 'Excluir Plano',
+                        message: 'Deseja excluir este plano?',
+                        onConfirm: async () => {
+                          try {
+                            await deleteDoc(doc(db, 'equipment', equipmentId, 'plans', plan.id));
+                            showToast('Plano excluído com sucesso.', 'success');
+                          } catch (err) {
+                            showToast('Erro ao excluir plano.', 'error');
+                          }
                         }
-                      }
-                    });
-                  }}
-                  className="text-zinc-300 hover:text-red-500 transition-colors"
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
+                      });
+                    }}
+                    className="text-zinc-300 hover:text-red-500 transition-colors"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              )}
             </div>
             {plan.partsRequired && plan.partsRequired.length > 0 && (
               <div className="mt-3 pt-3 border-t border-zinc-200/50">
@@ -2433,7 +2476,7 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
                       </Button>
                     </div>
                   )}
-                  {user.role !== 'operator' && (
+                  {user.role !== 'operator' && user.role !== 'supervisor' && (
                     <button 
                       onClick={() => onDeleteRecord(record.id)}
                       className="p-2 text-zinc-300 hover:text-red-500 transition-colors"
@@ -3024,7 +3067,7 @@ function ReportsSection({ equipment, records, user, onDeleteRecord, searchTerm }
                   </>
                 )}
                 <td className="p-4 text-center">
-                  {user.role !== 'operator' && (
+                  {user.role !== 'operator' && user.role !== 'supervisor' && (
                     <button 
                       onClick={() => onDeleteRecord(record.id)}
                       className="text-zinc-300 hover:text-red-500 transition-colors"
@@ -3086,6 +3129,10 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
   }, []);
 
   const handleRoleChange = async (uid: string, newRole: UserRole) => {
+    if (user.role !== 'admin' && user.role !== 'gestor') {
+      showToast('Você não tem permissão para alterar níveis de acesso.', 'error');
+      return;
+    }
     if (uid === user.uid) {
       showToast('Você não pode alterar seu próprio nível de acesso.', 'error');
       return;
@@ -3094,6 +3141,10 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
   };
 
   const handleDeleteUser = async (uid: string) => {
+    if (user.role !== 'admin' && user.role !== 'gestor') {
+      showToast('Você não tem permissão para excluir usuários.', 'error');
+      return;
+    }
     if (uid === user.uid) {
       showToast('Você não pode excluir seu próprio usuário.', 'error');
       return;
@@ -3119,6 +3170,10 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
 
   const handleRegisterUser = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (user.role !== 'admin' && user.role !== 'gestor') {
+      showToast('Você não tem permissão para cadastrar usuários.', 'error');
+      return;
+    }
     setLoading(true);
     setError('');
 
@@ -3164,6 +3219,10 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
   const handleUpdateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingUser) return;
+    if (user.role !== 'admin' && user.role !== 'gestor') {
+      showToast('Você não tem permissão para atualizar usuários.', 'error');
+      return;
+    }
     setLoading(true);
     setError('');
 
@@ -3191,7 +3250,7 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
           <h3 className="text-2xl font-bold text-zinc-900">Gestão de Usuários</h3>
           <p className="text-zinc-500">Controle quem tem acesso ao sistema e seus níveis de permissão.</p>
         </div>
-        {user.role === 'admin' && (
+        {(user.role === 'admin' || user.role === 'gestor') && (
           <Button onClick={() => setIsModalOpen(true)}>
             <Plus size={20} />
             Cadastrar Usuário
@@ -3246,6 +3305,7 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
             options={[
               { value: 'admin', label: 'Administrador' },
               { value: 'supervisor', label: 'Supervisor' },
+              { value: 'gestor', label: 'Gestor' },
               { value: 'operator', label: 'Operador' }
             ]}
           />
@@ -3317,6 +3377,7 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
               options={[
                 { value: 'admin', label: 'Administrador' },
                 { value: 'supervisor', label: 'Supervisor' },
+                { value: 'gestor', label: 'Gestor' },
                 { value: 'operator', label: 'Operador' }
               ]}
             />
@@ -3367,7 +3428,7 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
                   </div>
                 )}
               </div>
-              {user.role === 'admin' && (
+              {(user.role === 'admin' || user.role === 'gestor') && (
                 <div className="flex items-center gap-1">
                   <button 
                     onClick={() => {
@@ -3400,9 +3461,10 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
                 options={[
                   { value: 'admin', label: 'Administrador' },
                   { value: 'supervisor', label: 'Supervisor' },
+                  { value: 'gestor', label: 'Gestor' },
                   { value: 'operator', label: 'Operador' }
                 ]}
-                disabled={u.uid === user.uid || user.role !== 'admin'}
+                disabled={u.uid === user.uid || (user.role !== 'admin' && user.role !== 'gestor')}
               />
             </div>
           </Card>
