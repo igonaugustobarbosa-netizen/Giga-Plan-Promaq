@@ -23,9 +23,25 @@
         "technicalInfo": { "type": "string" },
         "photoUrl": { "type": "string" },
         "manualUrl": { "type": "string" },
+        "customerId": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["name"]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "Customer details for maintenance reports",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "taxId": { "type": "string" },
+        "address": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "website": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "taxId"]
     },
     "Part": {
       "title": "Part",
@@ -126,6 +142,10 @@
     "/notifications/{notificationId}": {
       "schema": "Notification",
       "description": "System notifications"
+    },
+    "/customers/{customerId}": {
+      "schema": "Customer",
+      "description": "Customer collection"
     }
   }
 }

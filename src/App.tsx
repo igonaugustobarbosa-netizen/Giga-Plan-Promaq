@@ -41,6 +41,7 @@ import {
   ChevronRight,
   Package,
   Clock,
+  Navigation,
   AlertCircle,
   CheckCircle2,
   Play,
@@ -67,7 +68,7 @@ import {
 import { QRCodeSVG } from 'qrcode.react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format, addHours, isAfter, parseISO, subDays, differenceInDays } from 'date-fns';
-import { UserProfile, Equipment, Part, MaintenancePlan, MaintenanceRecord, UserRole, MaintenanceStatus, AppNotification } from './types';
+import { UserProfile, Equipment, Part, MaintenancePlan, MaintenanceRecord, UserRole, MaintenanceStatus, AppNotification, Customer } from './types';
 
 // --- Utilities ---
 
@@ -253,6 +254,7 @@ export default function App() {
   const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [parts, setParts] = useState<Part[]>([]);
   const [maintenanceRecords, setMaintenanceRecords] = useState<MaintenanceRecord[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalType, setModalType] = useState<'equipment' | 'part' | 'plan' | 'record' | null>(null);
   const [selectedEquipment, setSelectedEquipment] = useState<Equipment | null>(null);
@@ -407,9 +409,19 @@ export default function App() {
       handleFirestoreError(error, OperationType.LIST, 'maintenance_records');
     });
 
+    const qCustomers = query(collection(db, 'customers'));
+    const unsubCustomers = onSnapshot(qCustomers, (snapshot) => {
+      console.log('Customers snapshot received. Count:', snapshot.size);
+      setCustomers(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Customer)));
+    }, (error) => {
+      console.error('Error fetching customers:', error);
+      handleFirestoreError(error, OperationType.LIST, 'customers');
+    });
+
     return () => {
       unsubEquip();
       unsubRecords();
+      unsubCustomers();
     };
   }, [user]);
 
@@ -511,12 +523,24 @@ export default function App() {
     doc.text(`Nome: ${record.equipmentName}`, 14, 52);
     doc.text(`Modelo: ${equip?.model || 'N/A'}`, 14, 57);
     doc.text(`Série: ${equip?.serialNumber || 'N/A'}`, 14, 62);
+    doc.text(`Horímetro: ${equip?.currentHours || 0}h`, 14, 67);
+    doc.text(`KM: ${equip?.currentKm || 0}km`, 14, 72);
+
+    let currentY = 77;
+
+    // Company Info
+    const company = customers.find(c => c.id === equip?.customerId);
+    if (company) {
+      doc.text(`Empresa: ${company.name}`, 14, currentY);
+      doc.text(`Contato: ${company.phone}`, 14, currentY + 5);
+      currentY += 15;
+    } else {
+      currentY += 5;
+    }
 
     // Add Equipment Image if available
     if (equip?.photoUrl) {
       try {
-        // Try to add the image. If it's a URL it might fail depending on jsPDF version/config, 
-        // but if it's base64 (common in this app) it works perfectly.
         const format = equip.photoUrl.includes('png') ? 'PNG' : 'JPEG';
         doc.addImage(equip.photoUrl, format, 140, 35, 50, 35);
       } catch (e) {
@@ -526,17 +550,28 @@ export default function App() {
 
     // Maintenance Info
     doc.setFontSize(14);
-    doc.text('Detalhes da Manutenção', 14, 75);
+    doc.text('Detalhes da Manutenção', 14, currentY);
     doc.setFontSize(10);
-    doc.text(`Plano: ${record.planDescription}`, 14, 82);
-    doc.text(`Status: ${record.status === 'in-progress' ? 'Em Andamento' : record.status === 'completed' ? 'Concluída' : 'Programada'}`, 14, 87);
-    doc.text(`Data de Início: ${format(parseISO(record.startDate), 'dd/MM/yyyy HH:mm')}`, 14, 92);
+    doc.text(`Plano: ${record.planDescription}`, 14, currentY + 7);
     
-    let currentY = 97;
-    if (record.scheduledStartDate) {
-      doc.text(`Programado para: ${format(parseISO(record.scheduledStartDate + 'T00:00:00'), 'dd/MM/yyyy')}`, 14, currentY);
-      currentY += 7;
+    let maintenanceY = currentY + 12;
+    if (record.criticality) {
+      doc.text(`Criticidade: ${record.criticality === 'high' ? 'Alta' : record.criticality === 'medium' ? 'Média' : 'Baixa'}`, 14, maintenanceY);
+      doc.text(`Status: ${record.status === 'in-progress' ? 'Em Andamento' : record.status === 'completed' ? 'Concluída' : 'Programada'}`, 14, maintenanceY + 5);
+      doc.text(`Data de Início: ${format(parseISO(record.startDate), 'dd/MM/yyyy HH:mm')}`, 14, maintenanceY + 10);
+      maintenanceY += 15;
+    } else {
+      doc.text(`Status: ${record.status === 'in-progress' ? 'Em Andamento' : record.status === 'completed' ? 'Concluída' : 'Programada'}`, 14, maintenanceY);
+      doc.text(`Data de Início: ${format(parseISO(record.startDate), 'dd/MM/yyyy HH:mm')}`, 14, maintenanceY + 5);
+      maintenanceY += 10;
     }
+    
+    if (record.scheduledStartDate) {
+      doc.text(`Programado para: ${format(parseISO(record.scheduledStartDate + 'T00:00:00'), 'dd/MM/yyyy')}`, 14, maintenanceY);
+      maintenanceY += 7;
+    }
+
+    currentY = maintenanceY;
 
     // Work Description from Plan
     if (plan?.workDescription) {
@@ -871,6 +906,12 @@ export default function App() {
             label="Equipamentos" 
           />
           <NavItem 
+            active={activeTab === 'customers'} 
+            onClick={() => { setActiveTab('customers'); setIsSidebarOpen(false); }} 
+            icon={<Users size={20} />} 
+            label="Empresas" 
+          />
+          <NavItem 
             active={activeTab === 'maintenance'} 
             onClick={() => { setActiveTab('maintenance'); setIsSidebarOpen(false); }} 
             icon={<Clock size={20} />} 
@@ -927,6 +968,7 @@ export default function App() {
             <h2 className="text-lg font-bold text-zinc-900">
               {activeTab === 'dashboard' ? 'Dashboard' :
                activeTab === 'equipment' ? 'Equipamentos' :
+               activeTab === 'customers' ? 'Empresas' :
                activeTab === 'maintenance' ? 'Manutenções' :
                activeTab === 'parts' ? 'Peças' :
                activeTab === 'reports' ? 'Relatórios' : 'Usuários'}
@@ -1033,10 +1075,11 @@ export default function App() {
 
         <div className="p-8 max-w-7xl mx-auto">
           {activeTab === 'dashboard' && <Dashboard equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} allPlans={allPlans} searchTerm={searchTerm} showToast={showToast} notifications={notifications} onGeneratePDF={generateServiceOrderPDF} />}
-          {activeTab === 'equipment' && <EquipmentSection equipment={equipment} records={maintenanceRecords} user={user} initialEquipId={initialEquipId} onClearInitialId={() => setInitialEquipId(null)} searchTerm={searchTerm} showToast={showToast} setConfirmModal={setConfirmModal} sendAlert={sendAlert} onGeneratePDF={generateServiceOrderPDF} />}
+          {activeTab === 'equipment' && <EquipmentSection equipment={equipment} records={maintenanceRecords} user={user} initialEquipId={initialEquipId} onClearInitialId={() => setInitialEquipId(null)} searchTerm={searchTerm} showToast={showToast} setConfirmModal={setConfirmModal} sendAlert={sendAlert} onGeneratePDF={generateServiceOrderPDF} customers={customers} />}
+          {activeTab === 'customers' && <CustomersSection customers={customers} user={user} searchTerm={searchTerm} showToast={showToast} setConfirmModal={setConfirmModal} sendAlert={sendAlert} />}
           {activeTab === 'maintenance' && <MaintenanceSection equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} searchTerm={searchTerm} sendAlert={sendAlert} onGeneratePDF={generateServiceOrderPDF} qrEquipId={qrEquipId} onClearQrFilter={() => setQrEquipId(null)} />}
           {activeTab === 'parts' && <PartsSection equipment={equipment} user={user} searchTerm={searchTerm} />}
-          {activeTab === 'reports' && <ReportsSection equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} searchTerm={searchTerm} />}
+          {activeTab === 'reports' && <ReportsSection equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} searchTerm={searchTerm} customers={customers} />}
           {activeTab === 'users' && <UsersSection user={user} searchTerm={searchTerm} showToast={showToast} setConfirmModal={setConfirmModal} sendAlert={sendAlert} />}
         </div>
 
@@ -1165,7 +1208,18 @@ function Dashboard({ equipment, records, user, onDeleteRecord, allPlans, searchT
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="font-bold text-zinc-900 truncate">{record.equipmentName}</p>
-                  <p className="text-xs text-orange-600 font-medium truncate">{record.planDescription}</p>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <p className="text-xs text-orange-600 font-medium truncate flex-1 min-w-0">{record.planDescription}</p>
+                    {record.criticality && (
+                      <span className={`text-[8px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded border shrink-0 ${
+                        record.criticality === 'high' ? 'text-red-600 bg-red-50 border-red-100' : 
+                        record.criticality === 'medium' ? 'text-orange-600 bg-orange-50 border-orange-100' : 
+                        'text-blue-600 bg-blue-50 border-blue-100'
+                      }`}>
+                        {record.criticality === 'high' ? 'Alta' : record.criticality === 'medium' ? 'Média' : 'Baixa'}
+                      </span>
+                    )}
+                  </div>
                 </div>
                   <div className="text-right flex items-center gap-3 shrink-0">
                     <div className="flex gap-4">
@@ -1284,7 +1338,7 @@ function StatCard({ label, value, icon }: any) {
   );
 }
 
-function EquipmentSection({ equipment, records, user, initialEquipId, onClearInitialId, searchTerm, showToast, setConfirmModal, sendAlert, onGeneratePDF }: { equipment: Equipment[], records: MaintenanceRecord[], user: UserProfile, initialEquipId?: string | null, onClearInitialId?: () => void, searchTerm: string, showToast: (m: string, t?: any) => void, setConfirmModal: any, sendAlert: any, onGeneratePDF: (r: MaintenanceRecord) => void }) {
+function EquipmentSection({ equipment, records, user, initialEquipId, onClearInitialId, searchTerm, showToast, setConfirmModal, sendAlert, onGeneratePDF, customers }: { equipment: Equipment[], records: MaintenanceRecord[], user: UserProfile, initialEquipId?: string | null, onClearInitialId?: () => void, searchTerm: string, showToast: (m: string, t?: any) => void, setConfirmModal: any, sendAlert: any, onGeneratePDF: (r: MaintenanceRecord) => void, customers: Customer[] }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<Equipment | null>(null);
   const [viewingItem, setViewingItem] = useState<Equipment | null>(null);
@@ -1352,10 +1406,13 @@ function EquipmentSection({ equipment, records, user, initialEquipId, onClearIni
       model: formData.get('model') as string,
       serialNumber: formData.get('serialNumber') as string,
       technicalInfo: formData.get('technicalInfo') as string,
+      customerId: formData.get('customerId') as string || null,
       photoUrl: photoSource === 'file' ? photoBase64 : formData.get('photoUrl') as string,
       manualUrl: manualSource === 'file' ? manualBase64 : formData.get('manualUrl') as string,
       currentHours: Number(formData.get('currentHours')),
       avgHoursPerDay: Number(formData.get('avgHoursPerDay')),
+      currentKm: Number(formData.get('currentKm')),
+      avgKmPerDay: Number(formData.get('avgKmPerDay')),
       createdAt: editingItem?.createdAt || new Date().toISOString()
     };
 
@@ -1473,6 +1530,10 @@ function EquipmentSection({ equipment, records, user, initialEquipId, onClearIni
                   <Clock size={14} />
                   <span className="text-xs font-medium">{item.currentHours || 0}h</span>
                 </div>
+                <div className="flex items-center gap-2 text-zinc-400 shrink-0">
+                  <Navigation size={14} />
+                  <span className="text-xs font-medium">{item.currentKm || 0}km</span>
+                </div>
               </div>
             </div>
           </Card>
@@ -1490,11 +1551,26 @@ function EquipmentSection({ equipment, records, user, initialEquipId, onClearIni
             <Input label="Modelo" name="model" defaultValue={editingItem?.model} />
           </div>
           <div className="grid grid-cols-1 gap-4">
+            <Select 
+              label="Empresa" 
+              name="customerId" 
+              defaultValue={editingItem?.customerId || ''}
+              options={[
+                { value: '', label: 'Nenhuma Empresa' },
+                ...customers.map(c => ({ value: c.id, label: c.name }))
+              ]}
+            />
+          </div>
+          <div className="grid grid-cols-1 gap-4">
             <Input label="Número de Série" name="serialNumber" defaultValue={editingItem?.serialNumber} />
           </div>
           <div className="grid grid-cols-2 gap-4">
             <Input label="Horímetro Atual (h)" name="currentHours" type="number" defaultValue={editingItem?.currentHours || 0} required />
             <Input label="Média de Uso (h/dia)" name="avgHoursPerDay" type="number" step="0.1" defaultValue={editingItem?.avgHoursPerDay || 0} required />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Input label="KM Atual" name="currentKm" type="number" defaultValue={editingItem?.currentKm || 0} />
+            <Input label="Média de Uso (km/dia)" name="avgKmPerDay" type="number" step="0.1" defaultValue={editingItem?.avgKmPerDay || 0} />
           </div>
 
           <div className="space-y-4">
@@ -1930,6 +2006,7 @@ function PlansList({ equipment, user, showToast, setConfirmModal }: { equipment:
       description: formData.get('description') as string,
       workDescription: formData.get('workDescription') as string,
       intervalHours: Number(formData.get('intervalHours')),
+      criticality: formData.get('criticality') as 'low' | 'medium' | 'high',
       partsRequired: selectedParts.filter(p => p.quantity > 0)
     };
     try {
@@ -2007,6 +2084,18 @@ function PlansList({ equipment, user, showToast, setConfirmModal }: { equipment:
             required 
           />
           
+          <Select 
+            label="Nível de Criticidade" 
+            name="criticality" 
+            defaultValue={editingPlan?.criticality || 'medium'}
+            required
+            options={[
+              { value: 'low', label: 'Baixa' },
+              { value: 'medium', label: 'Média' },
+              { value: 'high', label: 'Alta' }
+            ]}
+          />
+          
           <div className="space-y-2">
             <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Peças Necessárias para este Plano</p>
             {parts.length > 0 ? (
@@ -2059,6 +2148,13 @@ function PlansList({ equipment, user, showToast, setConfirmModal }: { equipment:
                 <p className="font-bold text-zinc-900 truncate">{plan.description}</p>
                 <div className="flex items-center gap-3">
                   <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest shrink-0">Intervalo: {plan.intervalHours}h</p>
+                  <p className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full border shrink-0 ${
+                    plan.criticality === 'high' ? 'text-red-600 bg-red-50 border-red-100' : 
+                    plan.criticality === 'medium' ? 'text-orange-600 bg-orange-50 border-orange-100' : 
+                    'text-blue-600 bg-blue-50 border-blue-100'
+                  }`}>
+                    Criticidade: {plan.criticality === 'high' ? 'Alta' : plan.criticality === 'medium' ? 'Média' : 'Baixa'}
+                  </p>
                   {calculateDaysRemaining(plan) !== null && (
                     <p className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full border truncate ${
                       (calculateDaysRemaining(plan) || 0) <= 7 ? 'text-red-600 bg-red-50 border-red-100' : 
@@ -2150,6 +2246,7 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
   const [selectedParts, setSelectedParts] = useState<{ partId: string, quantity: number }[]>([]);
   const [calculatedStartDate, setCalculatedStartDate] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'planned' | 'in-progress' | 'completed'>(qrEquipId ? 'in-progress' : 'all');
+  const [criticalityFilter, setCriticalityFilter] = useState<'all' | 'low' | 'medium' | 'high'>('all');
 
   useEffect(() => {
     if (qrEquipId) {
@@ -2233,10 +2330,13 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
       equipmentName: equip.name,
       planId: selectedPlanId,
       planDescription: plan.description,
+      criticality: (formData.get('criticality') as any) || plan.criticality || 'medium',
       status: 'in-progress',
       startDate: new Date().toISOString(),
       scheduledStartDate: formData.get('scheduledStartDate') as string,
       hoursPerDay: Number(formData.get('hoursPerDay')),
+      avgHoursPerDay: Number(formData.get('avgHoursPerDay')),
+      avgKmPerDay: Number(formData.get('avgKmPerDay')),
       scheduledStartTime: formData.get('scheduledStartTime') as string,
       scheduledEndTime: formData.get('scheduledEndTime') as string,
       totalPartsCost,
@@ -2272,8 +2372,11 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
     const totalLaborCost = Number(formData.get('totalLaborCost'));
 
     const update: any = {
+      criticality: formData.get('criticality') as any,
       scheduledStartDate: formData.get('scheduledStartDate') as string,
       hoursPerDay: Number(formData.get('hoursPerDay')),
+      avgHoursPerDay: Number(formData.get('avgHoursPerDay')),
+      avgKmPerDay: Number(formData.get('avgKmPerDay')),
       scheduledStartTime: formData.get('scheduledStartTime') as string,
       scheduledEndTime: formData.get('scheduledEndTime') as string,
       totalPartsCost,
@@ -2321,21 +2424,24 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
 
     const formData = new FormData(e.currentTarget);
     const hourMeter = Number(formData.get('hourMeter'));
+    const kmMeter = Number(formData.get('kmMeter'));
     const notes = formData.get('notes') as string;
 
     const update: any = { 
       status: 'completed',
       endDate: new Date().toISOString(),
       hourMeter,
+      kmMeter,
       notes: notes || completingRecord.notes || ''
     };
 
     // Update record
     await updateDoc(doc(db, 'maintenance_records', completingRecord.id), update);
     
-    // Update equipment current hours
+    // Update equipment current hours and km
     await updateDoc(doc(db, 'equipment', completingRecord.equipmentId), {
-      currentHours: hourMeter
+      currentHours: hourMeter,
+      currentKm: kmMeter
     });
 
     await sendAlert(`Manutenção concluída: ${completingRecord.planDescription} para ${completingRecord.equipmentName}. Horímetro: ${hourMeter}`, '✅ MANUTENÇÃO CONCLUÍDA', 'maintenance');
@@ -2353,11 +2459,12 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
   const filteredRecords = records.filter(record => {
     const matchesStatus = statusFilter === 'all' || record.status === statusFilter;
     const matchesEquip = !qrEquipId || record.equipmentId === qrEquipId;
+    const matchesCriticality = criticalityFilter === 'all' || record.criticality === criticalityFilter;
     const matchesSearch = 
       (record.equipmentName && record.equipmentName.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (record.planDescription && record.planDescription.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (record.notes && record.notes.toLowerCase().includes(searchTerm.toLowerCase()));
-    return matchesStatus && matchesSearch && matchesEquip;
+    return matchesStatus && matchesSearch && matchesEquip && matchesCriticality;
   });
 
   return (
@@ -2387,7 +2494,19 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
           <p className="text-zinc-500">Acompanhe e execute as manutenções preventivas.</p>
         </div>
         <div className="flex items-center gap-4">
-          <div className="w-48">
+          <div className="w-40">
+            <Select 
+              value={criticalityFilter}
+              onChange={(e: any) => setCriticalityFilter(e.target.value)}
+              options={[
+                { value: 'all', label: 'Todas Criticidades' },
+                { value: 'low', label: 'Baixa' },
+                { value: 'medium', label: 'Média' },
+                { value: 'high', label: 'Alta' }
+              ]}
+            />
+          </div>
+          <div className="w-40">
             <Select 
               value={statusFilter}
               onChange={(e: any) => setStatusFilter(e.target.value)}
@@ -2407,7 +2526,7 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
       <div className="grid grid-cols-1 gap-4">
         {filteredRecords.map(record => (
           <Card key={record.id} className="p-6">
-            <div className="flex items-center justify-between gap-6">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
               <div className="flex items-center gap-6 min-w-0">
                 <div className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 ${
                   record.status === 'in-progress' ? 'bg-orange-100 text-orange-600' : 
@@ -2418,18 +2537,31 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
                 </div>
                 <div className="min-w-0">
                   <h4 className="font-bold text-zinc-900 truncate">{record.equipmentName}</h4>
-                  <p className="text-sm text-zinc-500 truncate">{record.planDescription}</p>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <p className="text-sm text-zinc-500 truncate flex-1 min-w-0">{record.planDescription}</p>
+                    {record.criticality && (
+                      <span className={`text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded border shrink-0 ${
+                        record.criticality === 'high' ? 'text-red-600 bg-red-50 border-red-100' : 
+                        record.criticality === 'medium' ? 'text-orange-600 bg-orange-50 border-orange-100' : 
+                        'text-blue-600 bg-blue-50 border-blue-100'
+                      }`}>
+                        {record.criticality === 'high' ? 'Alta' : record.criticality === 'medium' ? 'Média' : 'Baixa'}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
 
-              <div className="flex items-center gap-8 shrink-0">
-                <div className="text-right">
+              <div className="flex flex-wrap items-center gap-4 md:gap-8 shrink-0">
+                <div className="text-right min-w-[100px]">
                   <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Status</p>
-                  <p className={`text-sm font-bold capitalize ${
-                    record.status === 'in-progress' ? 'text-orange-600' : 
-                    record.status === 'completed' ? 'text-emerald-600' : 
-                    'text-zinc-500'
-                  }`}>{record.status}</p>
+                  <p className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full border inline-block mt-1 ${
+                    record.status === 'in-progress' ? 'text-orange-600 bg-orange-50 border-orange-100' : 
+                    record.status === 'completed' ? 'text-emerald-600 bg-emerald-50 border-emerald-100' : 
+                    'text-zinc-500 bg-zinc-50 border-zinc-100'
+                  }`}>
+                    {record.status === 'in-progress' ? 'Em Andamento' : record.status === 'completed' ? 'Concluída' : 'Programada'}
+                  </p>
                 </div>
                 <div className="text-right">
                   <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Programação</p>
@@ -2524,6 +2656,19 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
             ]}
             required
           />
+
+          <Select 
+            label="Nível de Criticidade" 
+            name="criticality" 
+            key={`start-crit-${selectedPlanId}`}
+            defaultValue={plans.find(p => p.id === selectedPlanId)?.criticality || 'medium'}
+            required
+            options={[
+              { value: 'low', label: 'Baixa' },
+              { value: 'medium', label: 'Média' },
+              { value: 'high', label: 'Alta' }
+            ]}
+          />
           
           {selectedEquipId && plans.length === 0 && (
             <div className="p-4 bg-orange-50 border border-orange-100 rounded-xl flex items-start gap-3">
@@ -2555,6 +2700,26 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
                 step="0.5" 
                 min="0" 
                 defaultValue={equipment.find(e => e.id === selectedEquipId)?.avgHoursPerDay || 0}
+                required 
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <Input 
+                label="Média Hora/Dia" 
+                name="avgHoursPerDay" 
+                type="number" 
+                step="0.1" 
+                min="0" 
+                defaultValue={equipment.find(e => e.id === selectedEquipId)?.avgHoursPerDay || 0}
+                required 
+              />
+              <Input 
+                label="Média KM/Dia" 
+                name="avgKmPerDay" 
+                type="number" 
+                step="0.1" 
+                min="0" 
+                defaultValue={equipment.find(e => e.id === selectedEquipId)?.avgKmPerDay || 0}
                 required 
               />
             </div>
@@ -2634,15 +2799,26 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
             </div>
 
             <div className="space-y-4">
-              <Input 
-                label="Horímetro Atual na Finalização (h)" 
-                name="hourMeter" 
-                type="number" 
-                required 
-                placeholder="Ex: 1250"
-              />
+              <div className="grid grid-cols-2 gap-4">
+                <Input 
+                  label="Horímetro Final (h)" 
+                  name="hourMeter" 
+                  type="number" 
+                  required 
+                  defaultValue={equipment.find(e => e.id === completingRecord.equipmentId)?.currentHours}
+                  placeholder="Ex: 1250"
+                />
+                <Input 
+                  label="KM Final" 
+                  name="kmMeter" 
+                  type="number" 
+                  required 
+                  defaultValue={equipment.find(e => e.id === completingRecord.equipmentId)?.currentKm}
+                  placeholder="Ex: 50000"
+                />
+              </div>
               <p className="text-[10px] text-zinc-500 italic">
-                O horímetro do equipamento será atualizado automaticamente com este valor.
+                O horímetro e KM do equipamento serão atualizados automaticamente com estes valores.
               </p>
               
               <div className="space-y-1.5">
@@ -2685,6 +2861,18 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
               <p className="text-sm text-zinc-500">{editingRecord.planDescription}</p>
             </div>
 
+            <Select 
+              label="Nível de Criticidade" 
+              name="criticality" 
+              defaultValue={editingRecord.criticality || 'medium'}
+              required
+              options={[
+                { value: 'low', label: 'Baixa' },
+                { value: 'medium', label: 'Média' },
+                { value: 'high', label: 'Alta' }
+              ]}
+            />
+
             <div className="space-y-4 border-t border-zinc-100 pt-4">
               <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Programação</h4>
               <div className="grid grid-cols-2 gap-4">
@@ -2702,6 +2890,26 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
                   step="0.5"
                   min="0"
                   defaultValue={editingRecord.hoursPerDay} 
+                  required 
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <Input 
+                  label="Média Hora/Dia" 
+                  name="avgHoursPerDay" 
+                  type="number" 
+                  step="0.1" 
+                  min="0" 
+                  defaultValue={editingRecord.avgHoursPerDay || equipment.find(e => e.id === editingRecord.equipmentId)?.avgHoursPerDay || 0}
+                  required 
+                />
+                <Input 
+                  label="Média KM/Dia" 
+                  name="avgKmPerDay" 
+                  type="number" 
+                  step="0.1" 
+                  min="0" 
+                  defaultValue={editingRecord.avgKmPerDay || equipment.find(e => e.id === editingRecord.equipmentId)?.avgKmPerDay || 0}
                   required 
                 />
               </div>
@@ -2844,7 +3052,7 @@ function PartsSection({ equipment, user, searchTerm }: { equipment: Equipment[],
   );
 }
 
-function ReportsSection({ equipment, records, user, onDeleteRecord, searchTerm }: { equipment: Equipment[], records: MaintenanceRecord[], user: UserProfile, onDeleteRecord: (id: string) => void, searchTerm: string }) {
+function ReportsSection({ equipment, records, user, onDeleteRecord, searchTerm, customers }: { equipment: Equipment[], records: MaintenanceRecord[], user: UserProfile, onDeleteRecord: (id: string) => void, searchTerm: string, customers: Customer[] }) {
   const [filterDate, setFilterDate] = useState(format(new Date(), 'yyyy-MM'));
   const [selectedEquipId, setSelectedEquipId] = useState('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'planned' | 'in-progress' | 'completed'>('all');
@@ -2867,6 +3075,33 @@ function ReportsSection({ equipment, records, user, onDeleteRecord, searchTerm }
     const doc = new jsPDF();
     const equipName = selectedEquipId === 'all' ? 'Todos' : equipment.find(e => e.id === selectedEquipId)?.name || 'N/A';
     
+    let companyName = 'N/A';
+    let companyPhone = 'N/A';
+    if (selectedEquipId !== 'all') {
+      const equip = equipment.find(e => e.id === selectedEquipId);
+      const company = customers.find(c => c.id === equip?.customerId);
+      if (company) {
+        companyName = company.name;
+        companyPhone = company.phone;
+      }
+    } else if (filteredRecords.length > 0) {
+      const firstEquip = equipment.find(e => e.id === filteredRecords[0].equipmentId);
+      const firstCompanyId = firstEquip?.customerId;
+      const allSameCompany = filteredRecords.every(r => {
+        const eq = equipment.find(e => e.id === r.equipmentId);
+        return eq?.customerId === firstCompanyId;
+      });
+      if (allSameCompany && firstCompanyId) {
+        const company = customers.find(c => c.id === firstCompanyId);
+        if (company) {
+          companyName = company.name;
+          companyPhone = company.phone;
+        }
+      } else {
+        companyName = 'Várias';
+      }
+    }
+
     // Header
     doc.setFontSize(20);
     doc.setTextColor(40);
@@ -2875,18 +3110,27 @@ function ReportsSection({ equipment, records, user, onDeleteRecord, searchTerm }
     doc.setFontSize(11);
     doc.setTextColor(100);
     doc.text(`Equipamento: ${equipName}`, 14, 30);
-    doc.text(`Período: ${filterDate}`, 14, 35);
-    doc.text(`Status: ${statusFilter === 'all' ? 'Todos' : statusFilter}`, 14, 40);
-    doc.text(`Gerado em: ${format(new Date(), 'dd/MM/yyyy HH:mm')}`, 14, 45);
+    doc.text(`Empresa: ${companyName}`, 14, 35);
+    if (companyPhone !== 'N/A') {
+      doc.text(`Contato: ${companyPhone}`, 14, 40);
+      doc.text(`Período: ${filterDate}`, 14, 45);
+      doc.text(`Status: ${statusFilter === 'all' ? 'Todos' : statusFilter}`, 14, 50);
+      doc.text(`Gerado em: ${format(new Date(), 'dd/MM/yyyy HH:mm')}`, 14, 55);
+    } else {
+      doc.text(`Período: ${filterDate}`, 14, 40);
+      doc.text(`Status: ${statusFilter === 'all' ? 'Todos' : statusFilter}`, 14, 45);
+      doc.text(`Gerado em: ${format(new Date(), 'dd/MM/yyyy HH:mm')}`, 14, 50);
+    }
     
     // Summary
     doc.setFontSize(12);
     doc.setTextColor(0);
-    doc.text(isOperator ? 'Resumo da Operação' : 'Resumo Financeiro', 14, 50);
+    const summaryY = companyPhone !== 'N/A' ? 65 : 60;
+    doc.text(isOperator ? 'Resumo da Operação' : 'Resumo Financeiro', 14, summaryY);
     doc.setFontSize(10);
-    doc.text(`Total de Intervenções: ${filteredRecords.length}`, 14, 57);
+    doc.text(`Total de Intervenções: ${filteredRecords.length}`, 14, summaryY + 7);
     if (!isOperator) {
-      doc.text(`Custo Total: R$ ${totalCost.toLocaleString()}`, 14, 62);
+      doc.text(`Custo Total: R$ ${totalCost.toLocaleString()}`, 14, summaryY + 12);
     }
     
     const tableHead = isOperator 
@@ -2913,7 +3157,7 @@ function ReportsSection({ equipment, records, user, onDeleteRecord, searchTerm }
     });
 
     autoTable(doc, {
-      startY: isOperator ? 65 : 75,
+      startY: summaryY + (isOperator ? 15 : 25),
       head: tableHead,
       body: tableBody,
       theme: 'striped',
@@ -3470,6 +3714,162 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
           </Card>
         ))}
       </div>
+    </div>
+  );
+}
+
+function CustomersSection({ customers, user, searchTerm, showToast, setConfirmModal, sendAlert }: { customers: Customer[], user: UserProfile, searchTerm: string, showToast: (m: string, t?: any) => void, setConfirmModal: any, sendAlert: any }) {
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
+
+  const filteredCustomers = customers.filter(c => 
+    c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    c.taxId.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    c.email.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setSaving(true);
+    setSaveError('');
+    const formData = new FormData(e.currentTarget);
+    const data = {
+      name: formData.get('name') as string,
+      taxId: formData.get('taxId') as string,
+      address: formData.get('address') as string,
+      phone: formData.get('phone') as string,
+      email: formData.get('email') as string,
+      website: formData.get('website') as string,
+      createdAt: editingCustomer?.createdAt || new Date().toISOString()
+    };
+
+    try {
+      if (editingCustomer) {
+        await updateDoc(doc(db, 'customers', editingCustomer.id), data);
+        showToast('Empresa atualizada com sucesso.', 'success');
+      } else {
+        await addDoc(collection(db, 'customers'), data);
+        await sendAlert(`Nova empresa cadastrada: ${data.name}`, '🤝 NOVA EMPRESA', 'new');
+        showToast('Empresa cadastrada com sucesso.', 'success');
+      }
+      setIsModalOpen(false);
+      setEditingCustomer(null);
+    } catch (err: any) {
+      console.error('Error saving customer:', err);
+      setSaveError(handleFirestoreError(err, OperationType.WRITE, 'customers'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = (id: string) => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'Excluir Empresa',
+      message: 'Tem certeza que deseja excluir esta empresa? Isso não removerá o vínculo com equipamentos já cadastrados, mas eles ficarão sem referência.',
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'customers', id));
+          showToast('Empresa excluída com sucesso.', 'success');
+        } catch (err) {
+          showToast('Erro ao excluir empresa.', 'error');
+        }
+      }
+    });
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-2xl font-bold text-zinc-900">Gestão de Empresas</h3>
+          <p className="text-zinc-500">Cadastre e gerencie suas empresas.</p>
+        </div>
+        <Button onClick={() => { setEditingCustomer(null); setIsModalOpen(true); }}>
+          <Plus size={20} /> Nova Empresa
+        </Button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {filteredCustomers.map(customer => (
+          <Card key={customer.id} className="p-6">
+            <div className="flex justify-between items-start mb-4">
+              <div>
+                <h4 className="font-bold text-zinc-900 text-lg">{customer.name}</h4>
+                <p className="text-xs text-zinc-500 font-bold uppercase tracking-widest">{customer.taxId}</p>
+              </div>
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => { setEditingCustomer(customer); setIsModalOpen(true); }}
+                  className="p-2 text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 rounded-lg transition-all"
+                >
+                  <Edit3 size={16} />
+                </button>
+                <button 
+                  onClick={() => handleDelete(customer.id)}
+                  className="p-2 text-zinc-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            </div>
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 text-sm text-zinc-600">
+                <AlertCircle size={14} className="text-zinc-400" />
+                <span>{customer.address}</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-zinc-600">
+                <MessageCircle size={14} className="text-zinc-400" />
+                <span>{customer.phone}</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-zinc-600">
+                <Bell size={14} className="text-zinc-400" />
+                <span>{customer.email}</span>
+              </div>
+              {customer.website && (
+                <div className="flex items-center gap-2 text-sm text-zinc-600">
+                  <LayoutDashboard size={14} className="text-zinc-400" />
+                  <a href={customer.website.startsWith('http') ? customer.website : `https://${customer.website}`} target="_blank" className="text-blue-600 hover:underline truncate">
+                    {customer.website}
+                  </a>
+                </div>
+              )}
+            </div>
+          </Card>
+        ))}
+      </div>
+
+      <Modal 
+        isOpen={isModalOpen} 
+        onClose={() => setIsModalOpen(false)} 
+        title={editingCustomer ? 'Editar Empresa' : 'Nova Empresa'}
+      >
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <Input label="Nome / Razão Social" name="name" defaultValue={editingCustomer?.name} required />
+          <Input label="CNPJ / CPF" name="taxId" defaultValue={editingCustomer?.taxId} required />
+          <Input label="Endereço Completo" name="address" defaultValue={editingCustomer?.address} required />
+          <div className="grid grid-cols-2 gap-4">
+            <Input label="Telefone" name="phone" defaultValue={editingCustomer?.phone} required />
+            <Input label="E-mail" name="email" type="email" defaultValue={editingCustomer?.email} required />
+          </div>
+          <Input label="Site" name="website" defaultValue={editingCustomer?.website} placeholder="https://..." />
+
+          {saveError && (
+            <div className="p-3 bg-red-50 border border-red-100 rounded-xl text-red-600 text-xs font-medium">
+              {saveError}
+            </div>
+          )}
+
+          <div className="flex justify-end gap-3 pt-4">
+            <Button variant="outline" onClick={() => setIsModalOpen(false)} disabled={saving}>Cancelar</Button>
+            <Button type="submit" disabled={saving}>
+              {saving ? 'Salvando...' : 'Salvar Empresa'}
+            </Button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 }

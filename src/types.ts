@@ -19,6 +19,20 @@ export interface Equipment {
   manualUrl: string;
   currentHours: number;
   avgHoursPerDay: number;
+  currentKm?: number;
+  avgKmPerDay?: number;
+  customerId?: string;
+  createdAt: string;
+}
+
+export interface Customer {
+  id: string;
+  name: string;
+  taxId: string;
+  address: string;
+  phone: string;
+  email: string;
+  website: string;
   createdAt: string;
 }
 
@@ -40,6 +54,7 @@ export interface MaintenancePlan {
     partId: string;
     quantity: number;
   }[];
+  criticality: 'low' | 'medium' | 'high';
 }
 
 export type MaintenanceStatus = 'planned' | 'in-progress' | 'completed';
@@ -65,11 +80,15 @@ export interface MaintenanceRecord {
   totalPartsCost?: number;
   totalLaborCost?: number;
   hourMeter?: number;
+  kmMeter?: number;
+  avgHoursPerDay?: number;
+  avgKmPerDay?: number;
   usedParts?: UsedPart[];
   notes?: string;
   // Denormalized for reports
   equipmentName?: string;
   planDescription?: string;
+  criticality?: 'low' | 'medium' | 'high';
 }
 
 export interface AppNotification {
