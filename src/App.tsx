@@ -3291,7 +3291,7 @@ function ReportsSection({ equipment, records, user, onDeleteRecord, searchTerm, 
     
     const tableHead = isOperator 
       ? [['Data Real', 'Programado', 'Equipamento', 'Manutenção', 'Status', 'Peças Utilizadas']]
-      : [['Data Real', 'Programado', 'Equipamento', 'Manutenção', 'Status', 'Peças Utilizadas', 'Mão de Obra', 'Custo Peças Detalhado', 'Total Geral']];
+      : [['Data Real', 'Programado', 'Equipamento', 'Manutenção', 'Status', 'Peças', 'M. Obra', 'Custo Peças', 'Total']];
 
     const tableBody = filteredRecords.map(r => {
       const base = [
@@ -3313,64 +3313,68 @@ function ReportsSection({ equipment, records, user, onDeleteRecord, searchTerm, 
     });
 
     // Table
-    doc.setFontSize(9);
+    doc.setFontSize(8);
     doc.setTextColor(0);
     let y = 100;
     
     // Header
-    const colWidths = isOperator ? [25, 25, 40, 40, 25, 35] : [20, 20, 25, 25, 18, 25, 15, 25, 15];
+    const colWidths = isOperator 
+      ? [25, 25, 35, 35, 22, 40] 
+      : [18, 18, 22, 22, 15, 25, 15, 25, 22];
     const headers = tableHead[0];
     
-    // Draw table header background
-    doc.setFillColor(240, 240, 240);
-    doc.rect(14, y - 5, 182, 8, 'F');
-    
-    let x = 14;
-    headers.forEach((h, i) => {
+    const drawHeader = (currentY: number) => {
+      doc.setFillColor(240, 240, 240);
+      doc.rect(14, currentY - 5, 182, 8, 'F');
       doc.setFont('helvetica', 'bold');
-      doc.text(h, x, y);
-      x += colWidths[i];
-    });
+      doc.setFontSize(7.5);
+      let headerX = 14;
+      headers.forEach((h, i) => {
+        doc.text(h, headerX, currentY, { maxWidth: colWidths[i] - 1 });
+        headerX += colWidths[i];
+      });
+      doc.setDrawColor(200);
+      doc.line(14, currentY + 3, 196, currentY + 3);
+    };
+
+    drawHeader(y);
     
     y += 8;
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(8);
     
-    tableBody.forEach(row => {
+    tableBody.forEach((row, rowIndex) => {
       // Calculate row height based on content
       const rowHeights = row.map((cell, i) => {
         const text = String(cell);
         const splitText = doc.splitTextToSize(text, colWidths[i] - 2);
         return splitText.length * 4;
       });
-      const maxHeight = Math.max(...rowHeights, 10);
+      const maxHeight = Math.max(...rowHeights, 8);
 
       if (y + maxHeight > 275) {
         doc.addPage();
-        y = 20;
-        // Redraw header on new page
-        doc.setFillColor(240, 240, 240);
-        doc.rect(14, y - 5, 182, 8, 'F');
-        let headerX = 14;
-        headers.forEach((h, i) => {
-          doc.setFont('helvetica', 'bold');
-          doc.text(h, headerX, y);
-          headerX += colWidths[i];
-        });
+        y = 25;
+        drawHeader(y);
         y += 8;
         doc.setFont('helvetica', 'normal');
       }
 
-      x = 14;
+      // Alternating row background
+      if (rowIndex % 2 === 1) {
+        doc.setFillColor(252, 252, 252);
+        doc.rect(14, y - 4, 182, maxHeight + 2, 'F');
+      }
+
+      let x = 14;
       row.forEach((cell, i) => {
         const text = String(cell);
         doc.text(text, x, y, { maxWidth: colWidths[i] - 2 });
         x += colWidths[i];
       });
       
-      doc.setDrawColor(230, 230, 230);
-      doc.line(14, y + maxHeight - 2, 196, y + maxHeight - 2);
-      y += maxHeight;
+      doc.setDrawColor(240, 240, 240);
+      doc.line(14, y + maxHeight - 1, 196, y + maxHeight - 1);
+      y += maxHeight + 2;
     });
 
     // Add footer to all pages
