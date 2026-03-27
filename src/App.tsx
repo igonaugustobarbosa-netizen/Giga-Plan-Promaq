@@ -3373,7 +3373,7 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
   }, []);
 
   const handleRoleChange = async (uid: string, newRole: UserRole) => {
-    if (user.role !== 'admin' && user.role !== 'gestor') {
+    if (user.role !== 'admin' && user.role !== 'gestor' && user.role !== 'supervisor') {
       showToast('Você não tem permissão para alterar níveis de acesso.', 'error');
       return;
     }
@@ -3386,11 +3386,15 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
       showToast('Somente administradores podem gerenciar o nível de acesso de administrador.', 'error');
       return;
     }
+    if (user.role === 'supervisor' && (targetUser?.role !== 'operator' || newRole !== 'operator')) {
+      showToast('Supervisores só podem gerenciar operadores.', 'error');
+      return;
+    }
     await updateDoc(doc(db, 'users', uid), { role: newRole });
   };
 
   const handleDeleteUser = async (uid: string) => {
-    if (user.role !== 'admin' && user.role !== 'gestor') {
+    if (user.role !== 'admin' && user.role !== 'gestor' && user.role !== 'supervisor') {
       showToast('Você não tem permissão para excluir usuários.', 'error');
       return;
     }
@@ -3401,6 +3405,10 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
     const userToDelete = users.find(u => u.uid === uid);
     if (user.role !== 'admin' && userToDelete?.role === 'admin') {
       showToast('Somente administradores podem excluir outros administradores.', 'error');
+      return;
+    }
+    if (user.role === 'supervisor' && userToDelete?.role !== 'operator') {
+      showToast('Supervisores só podem excluir operadores.', 'error');
       return;
     }
     setConfirmModal({
@@ -3424,12 +3432,16 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
 
   const handleRegisterUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (user.role !== 'admin' && user.role !== 'gestor') {
+    if (user.role !== 'admin' && user.role !== 'gestor' && user.role !== 'supervisor') {
       showToast('Você não tem permissão para cadastrar usuários.', 'error');
       return;
     }
     if (user.role !== 'admin' && newUser.role === 'admin') {
       showToast('Somente administradores podem cadastrar outros administradores.', 'error');
+      return;
+    }
+    if (user.role === 'supervisor' && newUser.role !== 'operator') {
+      showToast('Supervisores só podem cadastrar operadores.', 'error');
       return;
     }
     setLoading(true);
@@ -3477,12 +3489,16 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
   const handleUpdateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingUser) return;
-    if (user.role !== 'admin' && user.role !== 'gestor') {
+    if (user.role !== 'admin' && user.role !== 'gestor' && user.role !== 'supervisor') {
       showToast('Você não tem permissão para atualizar usuários.', 'error');
       return;
     }
     if (user.role !== 'admin' && editingUser.role === 'admin') {
       showToast('Somente administradores podem editar outros administradores.', 'error');
+      return;
+    }
+    if (user.role === 'supervisor' && editingUser.role !== 'operator') {
+      showToast('Supervisores só podem editar operadores.', 'error');
       return;
     }
     setLoading(true);
@@ -3512,7 +3528,7 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
           <h3 className="text-2xl font-bold text-zinc-900">Gestão de Usuários</h3>
           <p className="text-zinc-500">Controle quem tem acesso ao sistema e seus níveis de permissão.</p>
         </div>
-        {(user.role === 'admin' || user.role === 'gestor') && (
+        {(user.role === 'admin' || user.role === 'gestor' || user.role === 'supervisor') && (
           <Button onClick={() => setIsModalOpen(true)}>
             <Plus size={20} />
             Cadastrar Usuário
@@ -3569,7 +3585,12 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
               { value: 'supervisor', label: 'Supervisor' },
               { value: 'gestor', label: 'Gestor' },
               { value: 'operator', label: 'Operador' }
-            ].filter(opt => user.role === 'admin' || opt.value !== 'admin')}
+            ].filter(opt => {
+              if (user.role === 'admin') return true;
+              if (user.role === 'gestor') return opt.value !== 'admin';
+              if (user.role === 'supervisor') return opt.value === 'operator';
+              return false;
+            })}
           />
           <Input 
             label="Telefone (WhatsApp)"
@@ -3643,7 +3664,12 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
                 { value: 'supervisor', label: 'Supervisor' },
                 { value: 'gestor', label: 'Gestor' },
                 { value: 'operator', label: 'Operador' }
-              ].filter(opt => user.role === 'admin' || opt.value !== 'admin')}
+              ].filter(opt => {
+                if (user.role === 'admin') return true;
+                if (user.role === 'gestor') return opt.value !== 'admin';
+                if (user.role === 'supervisor') return opt.value === 'operator';
+                return false;
+              })}
               disabled={user.role !== 'admin' && editingUser.role === 'admin'}
             />
             <Input 
@@ -3693,7 +3719,7 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
                   </div>
                 )}
               </div>
-              {(user.role === 'admin' || (user.role === 'gestor' && u.role !== 'admin')) && (
+              {(user.role === 'admin' || (user.role === 'gestor' && u.role !== 'admin') || (user.role === 'supervisor' && u.role === 'operator')) && (
                 <div className="flex items-center gap-1">
                   <button 
                     onClick={() => {
@@ -3728,8 +3754,13 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
                   { value: 'supervisor', label: 'Supervisor' },
                   { value: 'gestor', label: 'Gestor' },
                   { value: 'operator', label: 'Operador' }
-                ].filter(opt => user.role === 'admin' || opt.value !== 'admin')}
-                disabled={u.uid === user.uid || (user.role !== 'admin' && user.role !== 'gestor') || (user.role !== 'admin' && u.role === 'admin')}
+                ].filter(opt => {
+                  if (user.role === 'admin') return true;
+                  if (user.role === 'gestor') return opt.value !== 'admin';
+                  if (user.role === 'supervisor') return opt.value === 'operator';
+                  return false;
+                })}
+                disabled={u.uid === user.uid || (user.role !== 'admin' && user.role !== 'gestor' && user.role !== 'supervisor') || (user.role !== 'admin' && u.role === 'admin') || (user.role === 'supervisor' && u.role !== 'operator')}
               />
             </div>
           </Card>
