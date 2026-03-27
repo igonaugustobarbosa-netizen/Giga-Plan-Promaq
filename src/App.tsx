@@ -3381,6 +3381,11 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
       showToast('Você não pode alterar seu próprio nível de acesso.', 'error');
       return;
     }
+    const targetUser = users.find(u => u.uid === uid);
+    if (user.role !== 'admin' && (targetUser?.role === 'admin' || newRole === 'admin')) {
+      showToast('Somente administradores podem gerenciar o nível de acesso de administrador.', 'error');
+      return;
+    }
     await updateDoc(doc(db, 'users', uid), { role: newRole });
   };
 
@@ -3391,6 +3396,11 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
     }
     if (uid === user.uid) {
       showToast('Você não pode excluir seu próprio usuário.', 'error');
+      return;
+    }
+    const userToDelete = users.find(u => u.uid === uid);
+    if (user.role !== 'admin' && userToDelete?.role === 'admin') {
+      showToast('Somente administradores podem excluir outros administradores.', 'error');
       return;
     }
     setConfirmModal({
@@ -3416,6 +3426,10 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
     e.preventDefault();
     if (user.role !== 'admin' && user.role !== 'gestor') {
       showToast('Você não tem permissão para cadastrar usuários.', 'error');
+      return;
+    }
+    if (user.role !== 'admin' && newUser.role === 'admin') {
+      showToast('Somente administradores podem cadastrar outros administradores.', 'error');
       return;
     }
     setLoading(true);
@@ -3465,6 +3479,10 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
     if (!editingUser) return;
     if (user.role !== 'admin' && user.role !== 'gestor') {
       showToast('Você não tem permissão para atualizar usuários.', 'error');
+      return;
+    }
+    if (user.role !== 'admin' && editingUser.role === 'admin') {
+      showToast('Somente administradores podem editar outros administradores.', 'error');
       return;
     }
     setLoading(true);
@@ -3551,7 +3569,7 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
               { value: 'supervisor', label: 'Supervisor' },
               { value: 'gestor', label: 'Gestor' },
               { value: 'operator', label: 'Operador' }
-            ]}
+            ].filter(opt => user.role === 'admin' || opt.value !== 'admin')}
           />
           <Input 
             label="Telefone (WhatsApp)"
@@ -3595,25 +3613,27 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
               value={editingUser.username}
               disabled
             />
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Senha</label>
-              <div className="relative">
-                <input 
-                  type={showEditPassword ? "text" : "password"}
-                  value={editingUser.password || ''}
-                  onChange={(e: any) => setEditingUser({ ...editingUser, password: e.target.value })}
-                  required
-                  className="w-full px-4 py-2.5 bg-white border border-zinc-200 rounded-xl text-sm font-bold text-zinc-700 focus:outline-none focus:ring-4 focus:ring-zinc-100 focus:border-zinc-400 transition-all shadow-sm pr-12"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowEditPassword(!showEditPassword)}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600"
-                >
-                  {showEditPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                </button>
+            {!(user.role !== 'admin' && editingUser.role === 'admin') && (
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Senha</label>
+                <div className="relative">
+                  <input 
+                    type={showEditPassword ? "text" : "password"}
+                    value={editingUser.password || ''}
+                    onChange={(e: any) => setEditingUser({ ...editingUser, password: e.target.value })}
+                    required
+                    className="w-full px-4 py-2.5 bg-white border border-zinc-200 rounded-xl text-sm font-bold text-zinc-700 focus:outline-none focus:ring-4 focus:ring-zinc-100 focus:border-zinc-400 transition-all shadow-sm pr-12"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowEditPassword(!showEditPassword)}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600"
+                  >
+                    {showEditPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
             <Select 
               label="Nível de Acesso"
               value={editingUser.role}
@@ -3623,7 +3643,8 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
                 { value: 'supervisor', label: 'Supervisor' },
                 { value: 'gestor', label: 'Gestor' },
                 { value: 'operator', label: 'Operador' }
-              ]}
+              ].filter(opt => user.role === 'admin' || opt.value !== 'admin')}
+              disabled={user.role !== 'admin' && editingUser.role === 'admin'}
             />
             <Input 
               label="Telefone (WhatsApp)"
@@ -3672,7 +3693,7 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
                   </div>
                 )}
               </div>
-              {(user.role === 'admin' || user.role === 'gestor') && (
+              {(user.role === 'admin' || (user.role === 'gestor' && u.role !== 'admin')) && (
                 <div className="flex items-center gap-1">
                   <button 
                     onClick={() => {
@@ -3707,8 +3728,8 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
                   { value: 'supervisor', label: 'Supervisor' },
                   { value: 'gestor', label: 'Gestor' },
                   { value: 'operator', label: 'Operador' }
-                ]}
-                disabled={u.uid === user.uid || (user.role !== 'admin' && user.role !== 'gestor')}
+                ].filter(opt => user.role === 'admin' || opt.value !== 'admin')}
+                disabled={u.uid === user.uid || (user.role !== 'admin' && user.role !== 'gestor') || (user.role !== 'admin' && u.role === 'admin')}
               />
             </div>
           </Card>
