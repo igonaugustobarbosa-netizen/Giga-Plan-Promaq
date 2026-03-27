@@ -28,7 +28,6 @@ import {
   collectionGroup
 } from 'firebase/firestore';
 import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
 import { 
   Settings, 
   LayoutDashboard, 
@@ -499,152 +498,272 @@ export default function App() {
     if (isNew && latest.creatorUid !== user.uid && !latest.readBy?.includes(user.uid)) {
       showToast(`${latest.title}`, 'info');
     }
-  }, [notifications, user]);  const generateServiceOrderPDF = (record: MaintenanceRecord) => {
+  }, [notifications, user]);  const generateServiceOrderPDF = async (record: MaintenanceRecord) => {
     const doc = new jsPDF();
     const equip = equipment.find(e => e.id === record.equipmentId);
     const plan = allPlans.find(p => p.id === record.planId);
     const isOperator = user?.role === 'operator';
 
+    // Helper for images
+    const getImageData = (url: string): Promise<string> => {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = 'Anonymous';
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = img.width;
+          canvas.height = img.height;
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(img, 0, 0);
+          resolve(canvas.toDataURL('image/jpeg'));
+        };
+        img.onerror = () => reject(new Error('Failed to load image'));
+        img.src = url;
+      });
+    };
+
     // Header
-    doc.setFontSize(22);
-    doc.setTextColor(40);
-    doc.text('GIGA Plan Promaq - Ordem de Serviço', 14, 22);
+    doc.setFillColor(240, 240, 240);
+    doc.rect(0, 0, 210, 30, 'F');
+    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(20);
+    doc.setFont('helvetica', 'bold');
+    doc.text('GIGA Plan Promaq', 14, 12);
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'normal');
+    doc.text('Ordem de Serviço de Manutenção', 14, 22);
     
-    doc.setFontSize(10);
-    doc.setTextColor(100);
-    doc.text(`OS ID: ${record.id}`, 14, 30);
-    doc.text(`Gerado em: ${format(new Date(), 'dd/MM/yyyy HH:mm')}`, 14, 35);
+    doc.setTextColor(60, 60, 60);
+    doc.setFontSize(9);
+    doc.text(`OS ID: ${record.id}`, 160, 12);
+    doc.text(`Data: ${format(new Date(), 'dd/MM/yyyy HH:mm')}`, 160, 22);
 
-    // Equipment Info
+    doc.setTextColor(0, 0, 0);
+    let currentY = 45;
+
+    // Equipment Info Section
     doc.setFontSize(14);
-    doc.setTextColor(0);
-    doc.text('Informações do Equipamento', 14, 45);
+    doc.setFont('helvetica', 'bold');
+    doc.text('1. Informações do Equipamento', 14, currentY);
+    doc.setDrawColor(200, 200, 200);
+    doc.line(14, currentY + 2, 196, currentY + 2);
+    
+    currentY += 12;
     doc.setFontSize(10);
-    doc.text(`Nome: ${record.equipmentName}`, 14, 52);
-    doc.text(`Modelo: ${equip?.model || 'N/A'}`, 14, 57);
-    doc.text(`Série: ${equip?.serialNumber || 'N/A'}`, 14, 62);
-    doc.text(`Horímetro: ${equip?.currentHours || 0}h`, 14, 67);
-    doc.text(`KM: ${equip?.currentKm || 0}km`, 14, 72);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Nome:', 14, currentY);
+    doc.setFont('helvetica', 'normal');
+    doc.text(record.equipmentName || 'N/A', 45, currentY);
+    
+    currentY += 7;
+    doc.setFont('helvetica', 'bold');
+    doc.text('Modelo:', 14, currentY);
+    doc.setFont('helvetica', 'normal');
+    doc.text(equip?.model || 'N/A', 45, currentY);
+    
+    currentY += 7;
+    doc.setFont('helvetica', 'bold');
+    doc.text('Série:', 14, currentY);
+    doc.setFont('helvetica', 'normal');
+    doc.text(equip?.serialNumber || 'N/A', 45, currentY);
+    
+    currentY += 7;
+    doc.setFont('helvetica', 'bold');
+    doc.text('Horímetro/KM:', 14, currentY);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`${equip?.currentHours || 0}h / ${equip?.currentKm || 0}km`, 45, currentY);
 
-    let currentY = 77;
-
-    // Company Info
     const company = customers.find(c => c.id === equip?.customerId);
     if (company) {
-      doc.text(`Empresa: ${company.name}`, 14, currentY);
-      doc.text(`Contato: ${company.phone}`, 14, currentY + 5);
-      currentY += 15;
-    } else {
-      currentY += 5;
+      currentY += 7;
+      doc.setFont('helvetica', 'bold');
+      doc.text('Empresa:', 14, currentY);
+      doc.setFont('helvetica', 'normal');
+      doc.text(company.name, 45, currentY);
+      
+      currentY += 7;
+      doc.setFont('helvetica', 'bold');
+      doc.text('Contato:', 14, currentY);
+      doc.setFont('helvetica', 'normal');
+      doc.text(company.phone, 45, currentY);
     }
 
-    // Add Equipment Image if available
+    // Equipment Photo
     if (equip?.photoUrl) {
       try {
-        const format = equip.photoUrl.includes('png') ? 'PNG' : 'JPEG';
-        doc.addImage(equip.photoUrl, format, 140, 35, 50, 35);
+        const imgData = await getImageData(equip.photoUrl);
+        // Position photo on the right side of equipment info
+        doc.addImage(imgData, 'JPEG', 140, 50, 50, 50);
+        doc.setDrawColor(0);
+        doc.rect(140, 50, 50, 50); // Border for photo
       } catch (e) {
-        console.warn('Could not add equipment image to PDF:', e);
+        console.warn('Could not add equipment photo to PDF', e);
       }
     }
 
-    // Maintenance Info
+    currentY = Math.max(currentY + 15, 110);
+
+    // Maintenance Details Section
     doc.setFontSize(14);
-    doc.text('Detalhes da Manutenção', 14, currentY);
+    doc.setFont('helvetica', 'bold');
+    doc.text('2. Detalhes da Manutenção', 14, currentY);
+    doc.line(14, currentY + 2, 196, currentY + 2);
+    
+    currentY += 12;
     doc.setFontSize(10);
-    doc.text(`Plano: ${record.planDescription}`, 14, currentY + 7);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Plano:', 14, currentY);
+    doc.setFont('helvetica', 'normal');
+    doc.text(record.planDescription || 'N/A', 45, currentY);
     
-    let maintenanceY = currentY + 12;
-    if (record.criticality) {
-      doc.text(`Criticidade: ${record.criticality === 'high' ? 'Alta' : record.criticality === 'medium' ? 'Média' : 'Baixa'}`, 14, maintenanceY);
-      doc.text(`Status: ${record.status === 'in-progress' ? 'Em Andamento' : record.status === 'completed' ? 'Concluída' : 'Programada'}`, 14, maintenanceY + 5);
-      doc.text(`Data de Início: ${format(parseISO(record.startDate), 'dd/MM/yyyy HH:mm')}`, 14, maintenanceY + 10);
-      maintenanceY += 15;
-    } else {
-      doc.text(`Status: ${record.status === 'in-progress' ? 'Em Andamento' : record.status === 'completed' ? 'Concluída' : 'Programada'}`, 14, maintenanceY);
-      doc.text(`Data de Início: ${format(parseISO(record.startDate), 'dd/MM/yyyy HH:mm')}`, 14, maintenanceY + 5);
-      maintenanceY += 10;
-    }
+    currentY += 7;
+    doc.setFont('helvetica', 'bold');
+    doc.text('Criticidade:', 14, currentY);
+    const critLabel = record.criticality === 'high' ? 'ALTA' : record.criticality === 'medium' ? 'MÉDIA' : 'BAIXA';
+    if (record.criticality === 'high') doc.setTextColor(200, 0, 0);
+    doc.setFont('helvetica', 'bold');
+    doc.text(critLabel, 45, currentY);
+    doc.setTextColor(0, 0, 0);
     
+    currentY += 7;
+    doc.setFont('helvetica', 'bold');
+    doc.text('Status:', 14, currentY);
+    doc.setFont('helvetica', 'normal');
+    doc.text(record.status === 'in-progress' ? 'Em Andamento' : record.status === 'completed' ? 'Concluída' : 'Programada', 45, currentY);
+    
+    currentY += 7;
+    doc.setFont('helvetica', 'bold');
+    doc.text('Início:', 14, currentY);
+    doc.setFont('helvetica', 'normal');
+    doc.text(format(parseISO(record.startDate), 'dd/MM/yyyy HH:mm'), 45, currentY);
+
     if (record.scheduledStartDate) {
-      doc.text(`Programado para: ${format(parseISO(record.scheduledStartDate + 'T00:00:00'), 'dd/MM/yyyy')}`, 14, maintenanceY);
-      maintenanceY += 7;
+      currentY += 7;
+      doc.setFont('helvetica', 'bold');
+      doc.text('Programado:', 14, currentY);
+      doc.setFont('helvetica', 'normal');
+      doc.text(format(parseISO(record.scheduledStartDate + 'T00:00:00'), 'dd/MM/yyyy'), 45, currentY);
     }
 
-    currentY = maintenanceY;
+    currentY += 15;
 
-    // Work Description from Plan
+    // Work Description
     if (plan?.workDescription) {
-      currentY += 5;
       doc.setFontSize(14);
-      doc.text('Trabalhos a serem Realizados', 14, currentY);
+      doc.setFont('helvetica', 'bold');
+      doc.text('3. Trabalhos a serem Realizados', 14, currentY);
+      doc.line(14, currentY + 2, 196, currentY + 2);
+      
+      currentY += 10;
       doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
       const splitWork = doc.splitTextToSize(plan.workDescription, 180);
-      doc.text(splitWork, 14, currentY + 7);
-      currentY += 10 + (splitWork.length * 5);
-    } else {
-      currentY += 5;
+      doc.text(splitWork, 14, currentY);
+      currentY += (splitWork.length * 5) + 10;
     }
 
-    // Parts
+    // Parts Section
     if (record.usedParts && record.usedParts.length > 0) {
+      if (currentY > 240) { doc.addPage(); currentY = 20; }
       doc.setFontSize(14);
-      doc.text('Peças Utilizadas', 14, currentY);
+      doc.setFont('helvetica', 'bold');
+      doc.text('4. Peças Utilizadas', 14, currentY);
+      doc.line(14, currentY + 2, 196, currentY + 2);
       
-      const partsHead = isOperator 
-        ? [['Peça', 'Quantidade']]
-        : [['Peça', 'Quantidade', 'Custo Unit.', 'Total']];
+      currentY += 10;
+      doc.setFontSize(9);
+      // Table Header
+      doc.setFillColor(240, 240, 240);
+      doc.rect(14, currentY, 182, 7, 'F');
+      doc.setFont('helvetica', 'bold');
+      doc.text('Descrição da Peça', 16, currentY + 5);
+      doc.text('Qtd', 100, currentY + 5);
+      if (!isOperator) {
+        doc.text('V. Unit', 130, currentY + 5);
+        doc.text('V. Total', 165, currentY + 5);
+      }
       
-      const partsBody = record.usedParts.map(p => {
-        const base = [p.name, p.quantity.toString()];
-        if (isOperator) return base;
-        return [...base, `R$ ${p.unitCost.toFixed(2)}`, `R$ ${(p.unitCost * p.quantity).toFixed(2)}` ];
+      currentY += 12;
+      doc.setFont('helvetica', 'normal');
+      record.usedParts.forEach((p) => {
+        if (currentY > 270) { doc.addPage(); currentY = 20; }
+        doc.text(p.name, 16, currentY);
+        doc.text(p.quantity.toString(), 100, currentY);
+        if (!isOperator) {
+          doc.text(`R$ ${p.unitCost.toFixed(2)}`, 130, currentY);
+          doc.text(`R$ ${(p.unitCost * p.quantity).toFixed(2)}`, 165, currentY);
+        }
+        currentY += 6;
       });
-
-      autoTable(doc, {
-        startY: currentY + 5,
-        head: partsHead,
-        body: partsBody,
-        theme: 'striped',
-        headStyles: { fillColor: [0, 0, 0] },
-        styles: { fontSize: 8 }
-      });
-      currentY = (doc as any).lastAutoTable.finalY + 15;
-    } else {
       currentY += 10;
     }
 
     // Costs Summary
     if (!isOperator) {
+      if (currentY > 240) { doc.addPage(); currentY = 20; }
       doc.setFontSize(14);
-      doc.text('Resumo de Custos', 14, currentY);
+      doc.setFont('helvetica', 'bold');
+      doc.text('5. Resumo de Custos', 14, currentY);
+      doc.line(14, currentY + 2, 196, currentY + 2);
+      
+      currentY += 12;
       doc.setFontSize(10);
-      doc.text(`Custo de Peças: R$ ${(record.totalPartsCost || 0).toFixed(2)}`, 14, currentY + 7);
-      doc.text(`Custo de Mão de Obra: R$ ${(record.totalLaborCost || 0).toFixed(2)}`, 14, currentY + 12);
+      doc.setFont('helvetica', 'normal');
+      doc.text('Custo Total de Peças:', 14, currentY);
+      doc.text(`R$ ${(record.totalPartsCost || 0).toFixed(2)}`, 60, currentY);
+      
+      currentY += 7;
+      doc.text('Custo de Mão de Obra:', 14, currentY);
+      doc.text(`R$ ${(record.totalLaborCost || 0).toFixed(2)}`, 60, currentY);
+      
+      currentY += 10;
       doc.setFontSize(12);
-      doc.text(`TOTAL GERAL: R$ ${((record.totalPartsCost || 0) + (record.totalLaborCost || 0)).toFixed(2)}`, 14, currentY + 20);
-      currentY += 30;
+      doc.setFont('helvetica', 'bold');
+      doc.setFillColor(245, 245, 245);
+      doc.rect(14, currentY - 5, 182, 10, 'F');
+      doc.text('TOTAL GERAL DA ORDEM:', 16, currentY + 2);
+      doc.text(`R$ ${((record.totalPartsCost || 0) + (record.totalLaborCost || 0)).toFixed(2)}`, 140, currentY + 2);
+      currentY += 15;
     }
 
     // Notes
     if (record.notes) {
+      doc.addPage();
+      currentY = 20;
       doc.setFontSize(14);
-      doc.text('Observações Técnicas', 14, currentY);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Observações Técnicas / Relatório', 14, currentY);
+      doc.line(14, currentY + 2, 196, currentY + 2);
+      
+      currentY += 10;
       doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
       const splitNotes = doc.splitTextToSize(record.notes, 180);
-      doc.text(splitNotes, 14, currentY + 7);
+      doc.text(splitNotes, 14, currentY);
+      currentY += (splitNotes.length * 5) + 20;
+    } else {
+      currentY += 30;
     }
 
-    // Footer
+    // Signatures
+    if (currentY > 240) { doc.addPage(); currentY = 40; }
+    doc.setDrawColor(150);
+    doc.line(20, currentY + 15, 90, currentY + 15);
+    doc.setFontSize(8);
+    doc.text('Assinatura do Técnico', 35, currentY + 20);
+    
+    doc.line(120, currentY + 15, 190, currentY + 15);
+    doc.text('Assinatura da Empresa / Responsável', 125, currentY + 20);
+
+    // Footer on all pages
     const pageCount = doc.getNumberOfPages();
     for (let i = 1; i <= pageCount; i++) {
       doc.setPage(i);
       doc.setFontSize(8);
       doc.setTextColor(150);
-      const footerText = 'Desenvolvedor: Giga Elétrica | Contato: 43 996118806 | Joaquim Távora - PR';
-      const pageSize = doc.internal.pageSize;
-      const pageHeight = pageSize.height ? pageSize.height : pageSize.getHeight();
-      doc.text(footerText, 14, pageHeight - 10);
+      const footerText = 'GIGA Plan Promaq - Sistema de Gestão de Manutenção | Desenvolvedor: Giga Elétrica | 43 996118806';
+      doc.text(footerText, 14, 285);
+      doc.text(`Página ${i} de ${pageCount}`, 180, 285);
     }
 
     doc.save(`OS-${record.id}-${record.equipmentName}.pdf`);
@@ -3071,10 +3190,29 @@ function ReportsSection({ equipment, records, user, onDeleteRecord, searchTerm, 
   const totalCost = filteredRecords.reduce((acc, r) => acc + (r.totalPartsCost || 0) + (r.totalLaborCost || 0), 0);
   const isOperator = user.role === 'operator';
 
-  const handleExportPDF = () => {
+  const handleExportPDF = async () => {
     const doc = new jsPDF();
     const equipName = selectedEquipId === 'all' ? 'Todos' : equipment.find(e => e.id === selectedEquipId)?.name || 'N/A';
+    const selectedEquip = selectedEquipId !== 'all' ? equipment.find(e => e.id === selectedEquipId) : null;
     
+    // Helper for images
+    const getImageData = (url: string): Promise<string> => {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = 'Anonymous';
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = img.width;
+          canvas.height = img.height;
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(img, 0, 0);
+          resolve(canvas.toDataURL('image/jpeg'));
+        };
+        img.onerror = () => reject(new Error('Failed to load image'));
+        img.src = url;
+      });
+    };
+
     let companyName = 'N/A';
     let companyPhone = 'N/A';
     if (selectedEquipId !== 'all') {
@@ -3103,34 +3241,52 @@ function ReportsSection({ equipment, records, user, onDeleteRecord, searchTerm, 
     }
 
     // Header
+    doc.setFillColor(240, 240, 240);
+    doc.rect(0, 0, 210, 30, 'F');
+    doc.setTextColor(0, 0, 0);
     doc.setFontSize(20);
-    doc.setTextColor(40);
-    doc.text('GIGA Plan Promaq - Relatório de Manutenção', 14, 22);
+    doc.setFont('helvetica', 'bold');
+    doc.text('GIGA Plan Promaq', 14, 12);
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'normal');
+    doc.text('Relatório de Manutenções Realizadas', 14, 22);
     
+    doc.setTextColor(60, 60, 60);
+    doc.setFontSize(9);
+    doc.text(`Período: ${filterDate}`, 160, 12);
+    doc.text(`Gerado em: ${format(new Date(), 'dd/MM/yyyy HH:mm')}`, 160, 22);
+
+    doc.setTextColor(0, 0, 0);
     doc.setFontSize(11);
-    doc.setTextColor(100);
-    doc.text(`Equipamento: ${equipName}`, 14, 30);
-    doc.text(`Empresa: ${companyName}`, 14, 35);
-    if (companyPhone !== 'N/A') {
-      doc.text(`Contato: ${companyPhone}`, 14, 40);
-      doc.text(`Período: ${filterDate}`, 14, 45);
-      doc.text(`Status: ${statusFilter === 'all' ? 'Todos' : statusFilter}`, 14, 50);
-      doc.text(`Gerado em: ${format(new Date(), 'dd/MM/yyyy HH:mm')}`, 14, 55);
-    } else {
-      doc.text(`Período: ${filterDate}`, 14, 40);
-      doc.text(`Status: ${statusFilter === 'all' ? 'Todos' : statusFilter}`, 14, 45);
-      doc.text(`Gerado em: ${format(new Date(), 'dd/MM/yyyy HH:mm')}`, 14, 50);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Filtros Aplicados:', 14, 40);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Equipamento: ${equipName}`, 14, 46);
+    doc.text(`Empresa: ${companyName}`, 14, 52);
+    doc.text(`Status: ${statusFilter === 'all' ? 'Todos' : statusFilter}`, 14, 58);
+
+    // Equipment Photo in Report Header if single equipment
+    if (selectedEquip?.photoUrl) {
+      try {
+        const imgData = await getImageData(selectedEquip.photoUrl);
+        doc.addImage(imgData, 'JPEG', 160, 35, 35, 35);
+        doc.setDrawColor(200);
+        doc.rect(160, 35, 35, 35);
+      } catch (e) {
+        console.warn('Could not add equipment photo to report', e);
+      }
     }
     
     // Summary
     doc.setFontSize(12);
-    doc.setTextColor(0);
-    const summaryY = companyPhone !== 'N/A' ? 65 : 60;
-    doc.text(isOperator ? 'Resumo da Operação' : 'Resumo Financeiro', 14, summaryY);
+    doc.setFont('helvetica', 'bold');
+    doc.text(isOperator ? 'Resumo da Operação' : 'Resumo Financeiro', 14, 75);
     doc.setFontSize(10);
-    doc.text(`Total de Intervenções: ${filteredRecords.length}`, 14, summaryY + 7);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Total de Intervenções: ${filteredRecords.length}`, 14, 82);
     if (!isOperator) {
-      doc.text(`Custo Total: R$ ${totalCost.toLocaleString()}`, 14, summaryY + 12);
+      doc.setFont('helvetica', 'bold');
+      doc.text(`Custo Total do Período: R$ ${totalCost.toLocaleString()}`, 14, 88);
     }
     
     const tableHead = isOperator 
@@ -3156,19 +3312,65 @@ function ReportsSection({ equipment, records, user, onDeleteRecord, searchTerm, 
       ];
     });
 
-    autoTable(doc, {
-      startY: summaryY + (isOperator ? 15 : 25),
-      head: tableHead,
-      body: tableBody,
-      theme: 'striped',
-      headStyles: { fillColor: [0, 0, 0] },
-      styles: { fontSize: 7, cellPadding: 2 },
-      columnStyles: isOperator ? {
-        5: { cellWidth: 80 }
-      } : {
-        5: { cellWidth: 35 }, // Peças Utilizadas
-        7: { cellWidth: 45 }, // Custo Peças Detalhado
+    // Table
+    doc.setFontSize(9);
+    doc.setTextColor(0);
+    let y = 100;
+    
+    // Header
+    const colWidths = isOperator ? [25, 25, 40, 40, 25, 35] : [20, 20, 25, 25, 18, 25, 15, 25, 15];
+    const headers = tableHead[0];
+    
+    // Draw table header background
+    doc.setFillColor(240, 240, 240);
+    doc.rect(14, y - 5, 182, 8, 'F');
+    
+    let x = 14;
+    headers.forEach((h, i) => {
+      doc.setFont('helvetica', 'bold');
+      doc.text(h, x, y);
+      x += colWidths[i];
+    });
+    
+    y += 8;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    
+    tableBody.forEach(row => {
+      // Calculate row height based on content
+      const rowHeights = row.map((cell, i) => {
+        const text = String(cell);
+        const splitText = doc.splitTextToSize(text, colWidths[i] - 2);
+        return splitText.length * 4;
+      });
+      const maxHeight = Math.max(...rowHeights, 10);
+
+      if (y + maxHeight > 275) {
+        doc.addPage();
+        y = 20;
+        // Redraw header on new page
+        doc.setFillColor(240, 240, 240);
+        doc.rect(14, y - 5, 182, 8, 'F');
+        let headerX = 14;
+        headers.forEach((h, i) => {
+          doc.setFont('helvetica', 'bold');
+          doc.text(h, headerX, y);
+          headerX += colWidths[i];
+        });
+        y += 8;
+        doc.setFont('helvetica', 'normal');
       }
+
+      x = 14;
+      row.forEach((cell, i) => {
+        const text = String(cell);
+        doc.text(text, x, y, { maxWidth: colWidths[i] - 2 });
+        x += colWidths[i];
+      });
+      
+      doc.setDrawColor(230, 230, 230);
+      doc.line(14, y + maxHeight - 2, 196, y + maxHeight - 2);
+      y += maxHeight;
     });
 
     // Add footer to all pages
