@@ -55,6 +55,7 @@ export interface MaintenancePlan {
     quantity: number;
   }[];
   criticality: 'low' | 'medium' | 'high';
+  executor?: 'operador' | 'mecânico' | 'eletricista';
 }
 
 export type MaintenanceStatus = 'planned' | 'in-progress' | 'completed';

@@ -14,7 +14,7 @@ service cloud.firestore {
     // Fields: equipmentId, name, code, cost
     //
     // Subcollection: equipment/{id}/plans
-    // Fields: equipmentId, description, intervalHours, partsRequired
+    // Fields: equipmentId, description, intervalHours, partsRequired, criticality, executor
     //
     // Collection: maintenance_records
     // Fields: equipmentId, planId, status, startDate, endDate, totalPartsCost, totalLaborCost, usedParts, notes
@@ -58,9 +58,10 @@ service cloud.firestore {
     }
 
     function isValidUser(data) {
-      return data.keys().hasAll(['username', 'role']) &&
+      return data.keys().hasAll(['username', 'role', 'name']) &&
              data.role in ['admin', 'supervisor', 'operator'] &&
              data.username is string &&
+             data.name is string &&
              (!('password' in data) || data.password is string);
     }
 
@@ -77,8 +78,10 @@ service cloud.firestore {
     }
 
     function isValidPlan(data) {
-      return data.keys().hasAll(['description', 'intervalHours']) &&
-             data.description is string && data.intervalHours is number;
+      return data.keys().hasAll(['description', 'intervalHours', 'criticality', 'executor']) &&
+             data.description is string && data.intervalHours is number &&
+             data.criticality in ['low', 'medium', 'high'] &&
+             data.executor in ['operador', 'mecânico', 'eletricista'];
     }
 
     function isValidRecord(data) {
@@ -88,31 +91,38 @@ service cloud.firestore {
 
     // Rules
     match /users/{userId} {
-      allow read, write: if true;
+      allow read: if true; // Allow public read for custom login lookup
+      allow write: if isOwner(userId) && isValidUser(request.resource.data);
     }
 
     match /equipment/{equipmentId} {
-      allow read, write: if true;
+      allow read: if true; // Allow public read for custom login
+      allow write: if isAdmin() && isValidEquipment(request.resource.data);
 
       match /parts/{partId} {
-        allow read, write: if true;
+        allow read: if true;
+        allow write: if isSupervisor() && isValidPart(request.resource.data);
       }
 
       match /plans/{planId} {
-        allow read, write: if true;
+        allow read: if true;
+        allow write: if isSupervisor() && isValidPlan(request.resource.data);
       }
     }
 
     match /maintenance_records/{recordId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if isOperator() && isValidRecord(request.resource.data);
     }
 
     match /notifications/{notificationId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if isSupervisor();
     }
 
     match /customers/{customerId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if isAdmin();
     }
 
     match /test/connection {
@@ -121,11 +131,13 @@ service cloud.firestore {
 
     // Collection Group Rules
     match /{path=**}/plans/{planId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if isSupervisor() && isValidPlan(request.resource.data);
     }
 
     match /{path=**}/parts/{partId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if isSupervisor() && isValidPart(request.resource.data);
     }
   }
 }

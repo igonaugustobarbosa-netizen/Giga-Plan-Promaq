@@ -63,6 +63,8 @@
         "equipmentId": { "type": "string" },
         "description": { "type": "string" },
         "intervalHours": { "type": "number" },
+        "criticality": { "type": "string", "enum": ["low", "medium", "high"] },
+        "executor": { "type": "string", "enum": ["operador", "mecânico", "eletricista"] },
         "partsRequired": {
           "type": "array",
           "items": {

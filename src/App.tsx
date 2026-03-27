@@ -503,6 +503,7 @@ export default function App() {
     const equip = equipment.find(e => e.id === record.equipmentId);
     const plan = allPlans.find(p => p.id === record.planId);
     const isOperator = user?.role === 'operator';
+    const company = customers.find(c => c.id === equip?.customerId);
 
     // Helper for images
     const getImageData = (url: string): Promise<string> => {
@@ -528,14 +529,16 @@ export default function App() {
     doc.setTextColor(0, 0, 0);
     doc.setFontSize(20);
     doc.setFont('helvetica', 'bold');
-    doc.text('GIGA Plan Promaq', 14, 12);
+    doc.text(company?.name || 'GIGA Plan Promaq', 14, 12);
     doc.setFontSize(12);
     doc.setFont('helvetica', 'normal');
     doc.text('Ordem de Serviço de Manutenção', 14, 22);
     
     doc.setTextColor(60, 60, 60);
+    doc.setFontSize(8);
+    doc.text('GIGA Plan Promaq', 160, 8);
     doc.setFontSize(9);
-    doc.text(`OS ID: ${record.id}`, 160, 12);
+    doc.text(`OS ID: ${record.id}`, 160, 15);
     doc.text(`Data: ${format(new Date(), 'dd/MM/yyyy HH:mm')}`, 160, 22);
 
     doc.setTextColor(0, 0, 0);
@@ -573,7 +576,6 @@ export default function App() {
     doc.setFont('helvetica', 'normal');
     doc.text(`${equip?.currentHours || 0}h / ${equip?.currentKm || 0}km`, 45, currentY);
 
-    const company = customers.find(c => c.id === equip?.customerId);
     if (company) {
       currentY += 7;
       doc.setFont('helvetica', 'bold');
@@ -2126,6 +2128,7 @@ function PlansList({ equipment, user, showToast, setConfirmModal }: { equipment:
       workDescription: formData.get('workDescription') as string,
       intervalHours: Number(formData.get('intervalHours')),
       criticality: formData.get('criticality') as 'low' | 'medium' | 'high',
+      executor: formData.get('executor') as 'operador' | 'mecânico' | 'eletricista',
       partsRequired: selectedParts.filter(p => p.quantity > 0)
     };
     try {
@@ -2214,6 +2217,18 @@ function PlansList({ equipment, user, showToast, setConfirmModal }: { equipment:
               { value: 'high', label: 'Alta' }
             ]}
           />
+
+          <Select 
+            label="Executor Responsável" 
+            name="executor" 
+            defaultValue={editingPlan?.executor || 'mecânico'}
+            required
+            options={[
+              { value: 'operador', label: 'Operador' },
+              { value: 'mecânico', label: 'Mecânico' },
+              { value: 'eletricista', label: 'Eletricista' }
+            ]}
+          />
           
           <div className="space-y-2">
             <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Peças Necessárias para este Plano</p>
@@ -2274,6 +2289,11 @@ function PlansList({ equipment, user, showToast, setConfirmModal }: { equipment:
                   }`}>
                     Criticidade: {plan.criticality === 'high' ? 'Alta' : plan.criticality === 'medium' ? 'Média' : 'Baixa'}
                   </p>
+                  {plan.executor && (
+                    <p className="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full border border-zinc-200 bg-white text-zinc-600 shrink-0">
+                      Executor: {plan.executor.charAt(0).toUpperCase() + plan.executor.slice(1)}
+                    </p>
+                  )}
                   {calculateDaysRemaining(plan) !== null && (
                     <p className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full border truncate ${
                       (calculateDaysRemaining(plan) || 0) <= 7 ? 'text-red-600 bg-red-50 border-red-100' : 
@@ -3246,14 +3266,16 @@ function ReportsSection({ equipment, records, user, onDeleteRecord, searchTerm, 
     doc.setTextColor(0, 0, 0);
     doc.setFontSize(20);
     doc.setFont('helvetica', 'bold');
-    doc.text('GIGA Plan Promaq', 14, 12);
+    doc.text(companyName !== 'Várias' && companyName !== 'N/A' ? companyName : 'GIGA Plan Promaq', 14, 12);
     doc.setFontSize(12);
     doc.setFont('helvetica', 'normal');
     doc.text('Relatório de Manutenções Realizadas', 14, 22);
     
     doc.setTextColor(60, 60, 60);
+    doc.setFontSize(8);
+    doc.text('GIGA Plan Promaq', 160, 8);
     doc.setFontSize(9);
-    doc.text(`Período: ${filterDate}`, 160, 12);
+    doc.text(`Período: ${filterDate}`, 160, 15);
     doc.text(`Gerado em: ${format(new Date(), 'dd/MM/yyyy HH:mm')}`, 160, 22);
 
     doc.setTextColor(0, 0, 0);
