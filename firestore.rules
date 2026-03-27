@@ -118,5 +118,14 @@ service cloud.firestore {
     match /test/connection {
       allow read: if true;
     }
+
+    // Collection Group Rules
+    match /{path=**}/plans/{planId} {
+      allow read, write: if true;
+    }
+
+    match /{path=**}/parts/{partId} {
+      allow read, write: if true;
+    }
   }
 }
