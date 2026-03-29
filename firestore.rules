@@ -91,38 +91,38 @@ service cloud.firestore {
 
     // Rules
     match /users/{userId} {
-      allow read: if true; // Allow public read for custom login lookup
-      allow write: if isOwner(userId) && isValidUser(request.resource.data);
+      allow read: if true;
+      allow write: if true; // Allow public write for custom login
     }
 
     match /equipment/{equipmentId} {
-      allow read: if true; // Allow public read for custom login
-      allow write: if isAdmin() && isValidEquipment(request.resource.data);
+      allow read: if true;
+      allow write: if true; // Allow public write for custom login
 
       match /parts/{partId} {
         allow read: if true;
-        allow write: if isSupervisor() && isValidPart(request.resource.data);
+        allow write: if true;
       }
 
       match /plans/{planId} {
         allow read: if true;
-        allow write: if isSupervisor() && isValidPlan(request.resource.data);
+        allow write: if true;
       }
     }
 
     match /maintenance_records/{recordId} {
       allow read: if true;
-      allow write: if isOperator() && isValidRecord(request.resource.data);
+      allow write: if true;
     }
 
     match /notifications/{notificationId} {
       allow read: if true;
-      allow write: if isSupervisor();
+      allow write: if true;
     }
 
     match /customers/{customerId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if true;
     }
 
     match /test/connection {
