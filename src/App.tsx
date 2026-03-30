@@ -793,8 +793,8 @@ export default function App() {
   };
 
   const handleDeleteMaintenance = async (id: string) => {
-    if (user?.role === 'supervisor') {
-      showToast("Supervisores não têm permissão para excluir registros de manutenção.", "error");
+    if (user?.role === 'supervisor' || user?.role === 'operator') {
+      showToast("Você não tem permissão para excluir registros de manutenção.", "error");
       return;
     }
     setConfirmModal({
@@ -1206,7 +1206,7 @@ export default function App() {
           {activeTab === 'equipment' && <EquipmentSection equipment={equipment} records={maintenanceRecords} user={user} initialEquipId={initialEquipId} onClearInitialId={() => setInitialEquipId(null)} searchTerm={searchTerm} showToast={showToast} setConfirmModal={setConfirmModal} sendAlert={sendAlert} onGeneratePDF={generateServiceOrderPDF} customers={customers} />}
           {activeTab === 'customers' && <CustomersSection customers={customers} user={user} searchTerm={searchTerm} showToast={showToast} setConfirmModal={setConfirmModal} sendAlert={sendAlert} />}
           {activeTab === 'maintenance' && <MaintenanceSection equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} searchTerm={searchTerm} sendAlert={sendAlert} onGeneratePDF={generateServiceOrderPDF} showToast={showToast} qrEquipId={qrEquipId} onClearQrFilter={() => setQrEquipId(null)} />}
-          {activeTab === 'parts' && <PartsSection equipment={equipment} user={user} searchTerm={searchTerm} />}
+          {activeTab === 'parts' && <PartsSection equipment={equipment} user={user} searchTerm={searchTerm} showToast={showToast} setConfirmModal={setConfirmModal} />}
           {activeTab === 'reports' && <ReportsSection equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} searchTerm={searchTerm} customers={customers} />}
           {activeTab === 'users' && <UsersSection user={user} searchTerm={searchTerm} showToast={showToast} setConfirmModal={setConfirmModal} sendAlert={sendAlert} />}
         </div>
@@ -1992,7 +1992,7 @@ function EquipmentSection({ equipment, records, user, initialEquipId, onClearIni
               </div>
             )}
             
-            <PartsList equipmentId={viewingItem.id} equipmentName={viewingItem.name} user={user} searchTerm={searchTerm} />
+            <PartsList equipmentId={viewingItem.id} equipmentName={viewingItem.name} user={user} searchTerm={searchTerm} showToast={showToast} setConfirmModal={setConfirmModal} />
             <PlansList equipment={viewingItem} user={user} showToast={showToast} setConfirmModal={setConfirmModal} />
           </div>
         )}
@@ -2001,9 +2001,10 @@ function EquipmentSection({ equipment, records, user, initialEquipId, onClearIni
   );
 }
 
-function PartsList({ equipmentId, equipmentName, user, searchTerm }: { equipmentId: string, equipmentName: string, user: UserProfile, searchTerm: string }) {
+function PartsList({ equipmentId, equipmentName, user, searchTerm, showToast, setConfirmModal }: { equipmentId: string, equipmentName: string, user: UserProfile, searchTerm: string, showToast: (m: string, t?: any) => void, setConfirmModal: any }) {
   const [parts, setParts] = useState<Part[]>([]);
   const [isAdding, setIsAdding] = useState(false);
+  const [editingPart, setEditingPart] = useState<Part | null>(null);
 
   useEffect(() => {
     const q = query(collection(db, 'equipment', equipmentId, 'parts'));
@@ -2019,6 +2020,10 @@ function PartsList({ equipmentId, equipmentName, user, searchTerm }: { equipment
 
   const handleAddPart = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (user.role === 'operator') {
+      showToast("Você não tem permissão para realizar esta ação.", "error");
+      return;
+    }
     const formData = new FormData(e.currentTarget);
     const data = {
       equipmentId,
@@ -2026,8 +2031,42 @@ function PartsList({ equipmentId, equipmentName, user, searchTerm }: { equipment
       code: formData.get('code') as string,
       cost: Number(formData.get('cost'))
     };
-    await addDoc(collection(db, 'equipment', equipmentId, 'parts'), data);
-    setIsAdding(false);
+    
+    try {
+      if (editingPart) {
+        await updateDoc(doc(db, 'equipment', equipmentId, 'parts', editingPart.id), data);
+        showToast("Peça atualizada com sucesso.", "success");
+      } else {
+        await addDoc(collection(db, 'equipment', equipmentId, 'parts'), data);
+        showToast("Peça adicionada com sucesso.", "success");
+      }
+      setIsAdding(false);
+      setEditingPart(null);
+    } catch (error) {
+      console.error("Error saving part:", error);
+      showToast("Erro ao salvar peça.", "error");
+    }
+  };
+
+  const handleDeletePart = (part: Part) => {
+    if (user.role === 'operator') {
+      showToast("Você não tem permissão para realizar esta ação.", "error");
+      return;
+    }
+    setConfirmModal({
+      isOpen: true,
+      title: 'Excluir Peça',
+      message: `Tem certeza que deseja excluir a peça "${part.name}"? Esta ação não pode ser desfeita.`,
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'equipment', equipmentId, 'parts', part.id));
+          showToast("Peça excluída com sucesso.", "success");
+        } catch (error) {
+          console.error("Error deleting part:", error);
+          showToast("Erro ao excluir peça.", "error");
+        }
+      }
+    });
   };
 
   return (
@@ -2035,36 +2074,56 @@ function PartsList({ equipmentId, equipmentName, user, searchTerm }: { equipment
       <div className="flex items-center justify-between">
         <h5 className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Peças e Componentes</h5>
         {user.role !== 'operator' && (
-          <button onClick={() => setIsAdding(true)} className="text-xs font-bold text-black hover:underline flex items-center gap-1">
+          <button onClick={() => { setIsAdding(true); setEditingPart(null); }} className="text-xs font-bold text-black hover:underline flex items-center gap-1">
             <Plus size={12} /> Adicionar Peça
           </button>
         )}
       </div>
 
-      {isAdding && (
+      {(isAdding || editingPart) && (
         <form onSubmit={handleAddPart} className="p-4 bg-zinc-50 rounded-xl grid grid-cols-3 gap-3">
-          <Input label="Nome" name="name" required />
-          <Input label="Código" name="code" required />
-          <Input label="Custo (R$)" name="cost" type="number" step="0.01" required />
+          <Input label="Nome" name="name" defaultValue={editingPart?.name} required />
+          <Input label="Código" name="code" defaultValue={editingPart?.code} required />
+          <Input label="Custo (R$)" name="cost" type="number" step="0.01" defaultValue={editingPart?.cost} required />
           <div className="col-span-3 flex justify-end gap-2">
-            <Button variant="ghost" className="text-xs" onClick={() => setIsAdding(false)}>Cancelar</Button>
-            <Button type="submit" className="text-xs">Salvar</Button>
+            <Button variant="ghost" className="text-xs" onClick={() => { setIsAdding(false); setEditingPart(null); }}>Cancelar</Button>
+            <Button type="submit" className="text-xs">{editingPart ? 'Atualizar' : 'Salvar'}</Button>
           </div>
         </form>
       )}
 
       <div className="space-y-2">
         {filteredParts.map(part => (
-          <div key={part.id} className="flex items-center justify-between p-3 bg-white border border-zinc-100 rounded-lg text-sm">
-            <div>
+          <div key={part.id} className="flex items-center justify-between p-3 bg-white border border-zinc-100 rounded-lg text-sm group">
+            <div className="flex-1">
               <p className="font-bold">{part.name}</p>
               <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider">CÓD: {part.code}</p>
             </div>
-            <div className="text-right">
-              {!user.role || user.role !== 'operator' ? (
-                <p className="font-bold text-zinc-900">R$ {part.cost.toFixed(2)}</p>
-              ) : (
-                <p className="text-[10px] text-zinc-400 italic italic">Valor restrito</p>
+            <div className="flex items-center gap-4">
+              <div className="text-right">
+                {!user.role || user.role !== 'operator' ? (
+                  <p className="font-bold text-zinc-900">R$ {part.cost.toFixed(2)}</p>
+                ) : (
+                  <p className="text-[10px] text-zinc-400 italic italic">Valor restrito</p>
+                )}
+              </div>
+              {user.role !== 'operator' && (
+                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button 
+                    onClick={() => { setEditingPart(part); setIsAdding(false); }}
+                    className="p-1.5 text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 rounded-lg transition-all"
+                    title="Editar"
+                  >
+                    <Edit3 size={14} />
+                  </button>
+                  <button 
+                    onClick={() => handleDeletePart(part)}
+                    className="p-1.5 text-zinc-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                    title="Excluir"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
               )}
             </div>
           </div>
@@ -3209,7 +3268,7 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
   );
 }
 
-function PartsSection({ equipment, user, searchTerm }: { equipment: Equipment[], user: UserProfile, searchTerm: string }) {
+function PartsSection({ equipment, user, searchTerm, showToast, setConfirmModal }: { equipment: Equipment[], user: UserProfile, searchTerm: string, showToast: (m: string, t?: any) => void, setConfirmModal: any }) {
   const filteredEquipment = equipment.filter(item => 
     item.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
@@ -3250,6 +3309,8 @@ function PartsSection({ equipment, user, searchTerm }: { equipment: Equipment[],
                 equipmentName={equipment.find(e => e.id === selectedEquipId)?.name || ''} 
                 user={user} 
                 searchTerm={searchTerm} 
+                showToast={showToast}
+                setConfirmModal={setConfirmModal}
               />
             </Card>
           ) : (
@@ -4085,6 +4146,10 @@ function CustomersSection({ customers, user, searchTerm, showToast, setConfirmMo
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (user.role === 'operator') {
+      showToast('Você não tem permissão para realizar esta ação.', 'error');
+      return;
+    }
     setSaving(true);
     setSaveError('');
     const formData = new FormData(e.currentTarget);
@@ -4118,6 +4183,10 @@ function CustomersSection({ customers, user, searchTerm, showToast, setConfirmMo
   };
 
   const handleDelete = (id: string) => {
+    if (user.role === 'operator') {
+      showToast('Você não tem permissão para realizar esta ação.', 'error');
+      return;
+    }
     setConfirmModal({
       isOpen: true,
       title: 'Excluir Empresa',
@@ -4140,9 +4209,11 @@ function CustomersSection({ customers, user, searchTerm, showToast, setConfirmMo
           <h3 className="text-2xl font-bold text-zinc-900">Gestão de Empresas</h3>
           <p className="text-zinc-500">Cadastre e gerencie suas empresas.</p>
         </div>
-        <Button onClick={() => { setEditingCustomer(null); setIsModalOpen(true); }}>
-          <Plus size={20} /> Nova Empresa
-        </Button>
+        {user.role !== 'operator' && (
+          <Button onClick={() => { setEditingCustomer(null); setIsModalOpen(true); }}>
+            <Plus size={20} /> Nova Empresa
+          </Button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -4153,20 +4224,22 @@ function CustomersSection({ customers, user, searchTerm, showToast, setConfirmMo
                 <h4 className="font-bold text-zinc-900 text-lg">{customer.name}</h4>
                 <p className="text-xs text-zinc-500 font-bold uppercase tracking-widest">{customer.taxId}</p>
               </div>
-              <div className="flex gap-2">
-                <button 
-                  onClick={() => { setEditingCustomer(customer); setIsModalOpen(true); }}
-                  className="p-2 text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 rounded-lg transition-all"
-                >
-                  <Edit3 size={16} />
-                </button>
-                <button 
-                  onClick={() => handleDelete(customer.id)}
-                  className="p-2 text-zinc-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
-                >
-                  <Trash2 size={16} />
-                </button>
-              </div>
+              {user.role !== 'operator' && (
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => { setEditingCustomer(customer); setIsModalOpen(true); }}
+                    className="p-2 text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 rounded-lg transition-all"
+                  >
+                    <Edit3 size={16} />
+                  </button>
+                  <button 
+                    onClick={() => handleDelete(customer.id)}
+                    className="p-2 text-zinc-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              )}
             </div>
             <div className="space-y-3">
               <div className="flex items-center gap-2 text-sm text-zinc-600">
