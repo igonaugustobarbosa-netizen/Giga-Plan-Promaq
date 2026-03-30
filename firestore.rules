@@ -125,6 +125,11 @@ service cloud.firestore {
       allow write: if true;
     }
 
+    match /counters/{counterId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
     match /test/connection {
       allow read: if true;
     }

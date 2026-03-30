@@ -90,6 +90,8 @@ export interface MaintenanceRecord {
   equipmentName?: string;
   planDescription?: string;
   criticality?: 'low' | 'medium' | 'high';
+  executor?: string;
+  orderNumber?: number;
 }
 
 export interface AppNotification {

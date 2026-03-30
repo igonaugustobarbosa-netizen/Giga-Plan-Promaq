@@ -25,7 +25,8 @@ import {
   orderBy,
   limit,
   Timestamp,
-  collectionGroup
+  collectionGroup,
+  runTransaction
 } from 'firebase/firestore';
 import jsPDF from 'jspdf';
 import { 
@@ -538,7 +539,7 @@ export default function App() {
     doc.setFontSize(8);
     doc.text('GIGA Plan Promaq', 160, 8);
     doc.setFontSize(9);
-    doc.text(`OS ID: ${record.id}`, 160, 15);
+    doc.text(`OS N°${record.orderNumber ? String(record.orderNumber).padStart(5, '0') : 'N/A'}`, 160, 15);
     doc.text(`Data: ${format(new Date(), 'dd/MM/yyyy HH:mm')}`, 160, 22);
 
     doc.setTextColor(0, 0, 0);
@@ -617,6 +618,12 @@ export default function App() {
     doc.text('Plano:', 14, currentY);
     doc.setFont('helvetica', 'normal');
     doc.text(record.planDescription || 'N/A', 45, currentY);
+    
+    currentY += 7;
+    doc.setFont('helvetica', 'bold');
+    doc.text('Executor:', 14, currentY);
+    doc.setFont('helvetica', 'normal');
+    doc.text(record.executor || 'N/A', 45, currentY);
     
     currentY += 7;
     doc.setFont('helvetica', 'bold');
@@ -1198,7 +1205,7 @@ export default function App() {
           {activeTab === 'dashboard' && <Dashboard equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} allPlans={allPlans} searchTerm={searchTerm} showToast={showToast} notifications={notifications} onGeneratePDF={generateServiceOrderPDF} />}
           {activeTab === 'equipment' && <EquipmentSection equipment={equipment} records={maintenanceRecords} user={user} initialEquipId={initialEquipId} onClearInitialId={() => setInitialEquipId(null)} searchTerm={searchTerm} showToast={showToast} setConfirmModal={setConfirmModal} sendAlert={sendAlert} onGeneratePDF={generateServiceOrderPDF} customers={customers} />}
           {activeTab === 'customers' && <CustomersSection customers={customers} user={user} searchTerm={searchTerm} showToast={showToast} setConfirmModal={setConfirmModal} sendAlert={sendAlert} />}
-          {activeTab === 'maintenance' && <MaintenanceSection equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} searchTerm={searchTerm} sendAlert={sendAlert} onGeneratePDF={generateServiceOrderPDF} qrEquipId={qrEquipId} onClearQrFilter={() => setQrEquipId(null)} />}
+          {activeTab === 'maintenance' && <MaintenanceSection equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} searchTerm={searchTerm} sendAlert={sendAlert} onGeneratePDF={generateServiceOrderPDF} showToast={showToast} qrEquipId={qrEquipId} onClearQrFilter={() => setQrEquipId(null)} />}
           {activeTab === 'parts' && <PartsSection equipment={equipment} user={user} searchTerm={searchTerm} />}
           {activeTab === 'reports' && <ReportsSection equipment={equipment} records={maintenanceRecords} user={user} onDeleteRecord={handleDeleteMaintenance} searchTerm={searchTerm} customers={customers} />}
           {activeTab === 'users' && <UsersSection user={user} searchTerm={searchTerm} showToast={showToast} setConfirmModal={setConfirmModal} sendAlert={sendAlert} />}
@@ -1328,7 +1335,10 @@ function Dashboard({ equipment, records, user, onDeleteRecord, allPlans, searchT
                   <Clock className="text-orange-600" size={20} />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="font-bold text-zinc-900 truncate">{record.equipmentName}</p>
+                  <p className="font-bold text-zinc-900 truncate">
+                    {record.orderNumber && <span className="text-blue-600 mr-2">OS N°{String(record.orderNumber).padStart(5, '0')}</span>}
+                    {record.equipmentName}
+                  </p>
                   <div className="flex items-center gap-2 min-w-0">
                     <p className="text-xs text-orange-600 font-medium truncate flex-1 min-w-0">{record.planDescription}</p>
                     {record.criticality && (
@@ -1962,7 +1972,10 @@ function EquipmentSection({ equipment, records, user, initialEquipId, onClearIni
                   {records.filter(r => r.equipmentId === viewingItem.id && r.status === 'in-progress').map(record => (
                     <div key={record.id} className="p-4 bg-orange-50 border border-orange-100 rounded-xl flex items-center justify-between">
                       <div>
-                        <p className="text-sm font-bold text-orange-900">{record.planDescription}</p>
+                        <p className="text-sm font-bold text-orange-900">
+                          {record.orderNumber && <span className="text-blue-600 mr-2">OS N°{String(record.orderNumber).padStart(5, '0')}</span>}
+                          {record.planDescription}
+                        </p>
                         <p className="text-[10px] text-orange-700">Iniciado em: {format(parseISO(record.startDate), 'dd/MM/yyyy HH:mm')}</p>
                       </div>
                       <Button 
@@ -2372,7 +2385,7 @@ function PlansList({ equipment, user, showToast, setConfirmModal }: { equipment:
   );
 }
 
-function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTerm, sendAlert, onGeneratePDF, qrEquipId, onClearQrFilter }: { equipment: Equipment[], records: MaintenanceRecord[], user: UserProfile, onDeleteRecord: (id: string) => void, searchTerm: string, sendAlert: any, onGeneratePDF: (r: MaintenanceRecord) => void, qrEquipId?: string | null, onClearQrFilter?: () => void }) {
+function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTerm, sendAlert, onGeneratePDF, showToast, qrEquipId, onClearQrFilter }: { equipment: Equipment[], records: MaintenanceRecord[], user: UserProfile, onDeleteRecord: (id: string) => void, searchTerm: string, sendAlert: any, onGeneratePDF: (r: MaintenanceRecord) => void, showToast: (m: string, t?: any) => void, qrEquipId?: string | null, onClearQrFilter?: () => void }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isCompleteModalOpen, setIsCompleteModalOpen] = useState(false);
@@ -2470,6 +2483,7 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
       planId: selectedPlanId,
       planDescription: plan.description,
       criticality: (formData.get('criticality') as any) || plan.criticality || 'medium',
+      executor: (formData.get('executor') as string) || plan.executor || 'N/A',
       status: 'in-progress',
       startDate: new Date().toISOString(),
       scheduledStartDate: formData.get('scheduledStartDate') as string,
@@ -2484,8 +2498,30 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
       notes
     };
 
-    await addDoc(collection(db, 'maintenance_records'), data);
-    await sendAlert(`Manutenção iniciada: ${data.planDescription} para ${data.equipmentName}`, '🛠️ MANUTENÇÃO INICIADA', 'maintenance');
+    try {
+      await runTransaction(db, async (transaction) => {
+        const counterRef = doc(db, 'counters', 'maintenance_records');
+        const counterDoc = await transaction.get(counterRef);
+        
+        let nextNumber = 1;
+        if (counterDoc.exists()) {
+          nextNumber = (counterDoc.data().lastNumber || 0) + 1;
+        }
+        
+        transaction.set(counterRef, { lastNumber: nextNumber }, { merge: true });
+        
+        const newRecordRef = doc(collection(db, 'maintenance_records'));
+        transaction.set(newRecordRef, { ...data, orderNumber: nextNumber });
+        
+        data.orderNumber = nextNumber;
+      });
+
+      await sendAlert(`Manutenção iniciada (OS N°${String(data.orderNumber).padStart(5, '0')}): ${data.planDescription} para ${data.equipmentName}`, '🛠️ MANUTENÇÃO INICIADA', 'maintenance');
+      showToast(`Manutenção iniciada com sucesso. OS N°${String(data.orderNumber).padStart(5, '0')}`, 'success');
+    } catch (error: any) {
+      console.error('Error starting maintenance:', error);
+      showToast('Erro ao iniciar manutenção.', 'error');
+    }
     
     setIsModalOpen(false);
     setSelectedParts([]);
@@ -2512,6 +2548,7 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
 
     const update: any = {
       criticality: formData.get('criticality') as any,
+      executor: formData.get('executor') as string,
       scheduledStartDate: formData.get('scheduledStartDate') as string,
       hoursPerDay: Number(formData.get('hoursPerDay')),
       avgHoursPerDay: Number(formData.get('avgHoursPerDay')),
@@ -2675,7 +2712,10 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
                   {record.status === 'in-progress' ? <Clock /> : record.status === 'completed' ? <CheckCircle2 /> : <AlertCircle />}
                 </div>
                 <div className="min-w-0">
-                  <h4 className="font-bold text-zinc-900 truncate">{record.equipmentName}</h4>
+                  <h4 className="font-bold text-zinc-900 truncate">
+                    {record.orderNumber && <span className="text-blue-600 mr-2">OS N°{String(record.orderNumber).padStart(5, '0')}</span>}
+                    {record.equipmentName}
+                  </h4>
                   <div className="flex items-center gap-2 min-w-0">
                     <p className="text-sm text-zinc-500 truncate flex-1 min-w-0">{record.planDescription}</p>
                     {record.criticality && (
@@ -2685,6 +2725,11 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
                         'text-blue-600 bg-blue-50 border-blue-100'
                       }`}>
                         {record.criticality === 'high' ? 'Alta' : record.criticality === 'medium' ? 'Média' : 'Baixa'}
+                      </span>
+                    )}
+                    {record.executor && (
+                      <span className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded border border-zinc-200 bg-zinc-50 text-zinc-500 shrink-0">
+                        {record.executor}
                       </span>
                     )}
                   </div>
@@ -2806,6 +2851,20 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
               { value: 'low', label: 'Baixa' },
               { value: 'medium', label: 'Média' },
               { value: 'high', label: 'Alta' }
+            ]}
+          />
+
+          <Select 
+            label="Executor Responsável" 
+            name="executor" 
+            key={`start-exec-${selectedPlanId}`}
+            defaultValue={plans.find(p => p.id === selectedPlanId)?.executor || 'N/A'}
+            required
+            options={[
+              { value: 'operador', label: 'Operador' },
+              { value: 'mecânico', label: 'Mecânico' },
+              { value: 'eletricista', label: 'Eletricista' },
+              { value: 'N/A', label: 'Não Definido' }
             ]}
           />
           
@@ -3009,6 +3068,19 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
                 { value: 'low', label: 'Baixa' },
                 { value: 'medium', label: 'Média' },
                 { value: 'high', label: 'Alta' }
+              ]}
+            />
+
+            <Select 
+              label="Executor Responsável" 
+              name="executor" 
+              defaultValue={editingRecord.executor || 'N/A'}
+              required
+              options={[
+                { value: 'operador', label: 'Operador' },
+                { value: 'mecânico', label: 'Mecânico' },
+                { value: 'eletricista', label: 'Eletricista' },
+                { value: 'N/A', label: 'Não Definido' }
               ]}
             />
 
@@ -3312,11 +3384,12 @@ function ReportsSection({ equipment, records, user, onDeleteRecord, searchTerm, 
     }
     
     const tableHead = isOperator 
-      ? [['Data Real', 'Programado', 'Equipamento', 'Manutenção', 'Status', 'Peças Utilizadas']]
-      : [['Data Real', 'Programado', 'Equipamento', 'Manutenção', 'Status', 'Peças', 'M. Obra', 'Custo Peças', 'Total']];
+      ? [['OS', 'Data Real', 'Programado', 'Equipamento', 'Manutenção', 'Status', 'Peças Utilizadas']]
+      : [['OS', 'Data Real', 'Programado', 'Equipamento', 'Manutenção', 'Status', 'Peças', 'M. Obra', 'Custo Peças', 'Total']];
 
     const tableBody = filteredRecords.map(r => {
       const base = [
+        r.orderNumber ? `OS N°${String(r.orderNumber).padStart(5, '0')}` : 'N/A',
         format(parseISO(r.startDate), 'dd/MM/yyyy'),
         r.scheduledStartDate ? format(parseISO(r.scheduledStartDate + 'T00:00:00'), 'dd/MM/yyyy') : '--/--/----',
         r.equipmentName || 'N/A',
@@ -3341,8 +3414,8 @@ function ReportsSection({ equipment, records, user, onDeleteRecord, searchTerm, 
     
     // Header
     const colWidths = isOperator 
-      ? [25, 25, 35, 35, 22, 40] 
-      : [18, 18, 22, 22, 15, 25, 15, 25, 22];
+      ? [15, 20, 20, 30, 30, 22, 45] 
+      : [12, 16, 16, 20, 20, 15, 25, 15, 25, 18];
     const headers = tableHead[0];
     
     const drawHeader = (currentY: number) => {
