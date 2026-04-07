@@ -1335,12 +1335,9 @@ function Dashboard({ equipment, records, user, onDeleteRecord, allPlans, searchT
                   <Clock className="text-orange-600" size={20} />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="font-bold text-zinc-900 truncate">
-                    {record.orderNumber && <span className="text-blue-600 mr-2">OS N°{String(record.orderNumber).padStart(5, '0')}</span>}
-                    {record.equipmentName}
-                  </p>
+                  <p className="font-bold text-zinc-900">{record.orderNumber && <span className="text-blue-600 mr-2">OS N°{String(record.orderNumber).padStart(5, '0')}</span>}{record.equipmentName}</p>
                   <div className="flex items-center gap-2 min-w-0">
-                    <p className="text-xs text-orange-600 font-medium truncate flex-1 min-w-0">{record.planDescription}</p>
+                    <p className="text-xs text-orange-600 font-medium flex-1 min-w-0">{record.planDescription}</p>
                     {record.criticality && (
                       <span className={`text-[8px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded border shrink-0 ${
                         record.criticality === 'high' ? 'text-red-600 bg-red-50 border-red-100' : 
@@ -1406,7 +1403,7 @@ function Dashboard({ equipment, records, user, onDeleteRecord, allPlans, searchT
                   <span className={`w-2 h-2 rounded-full ${n.type === 'alert' ? 'bg-red-500' : 'bg-blue-500'}`} />
                   <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">{n.title}</p>
                 </div>
-                <p className="text-xs text-zinc-600 line-clamp-2">{n.description}</p>
+                <p className="text-xs text-zinc-600">{n.description}</p>
                 <div className="flex items-center justify-between mt-2">
                   <p className="text-[10px] text-zinc-400">{format(parseISO(n.date), 'dd/MM HH:mm')}</p>
                   {n.whatsappMessage && (
@@ -1651,11 +1648,11 @@ function EquipmentSection({ equipment, records, user, initialEquipId, onClearIni
                 <h4 className="font-bold text-zinc-900 text-lg">{item.name}</h4>
                 <span className="px-2 py-1 bg-zinc-100 text-zinc-500 text-[10px] font-bold rounded uppercase tracking-wider">{item.model}</span>
               </div>
-              <p className="text-sm text-zinc-500 mb-4 line-clamp-2">{item.technicalInfo || 'Sem informações técnicas cadastradas.'}</p>
+              <p className="text-sm text-zinc-500 mb-4">{item.technicalInfo || 'Sem informações técnicas cadastradas.'}</p>
               <div className="flex items-center justify-between pt-4 border-t border-zinc-100 gap-4">
                 <div className="flex items-center gap-2 text-zinc-400 min-w-0">
                   <Package size={14} className="shrink-0" />
-                  <span className="text-xs font-medium truncate">S/N: {item.serialNumber}</span>
+                  <span className="text-xs font-medium">S/N: {item.serialNumber}</span>
                 </div>
                 <div className="flex items-center gap-2 text-zinc-400 shrink-0">
                   <Clock size={14} />
@@ -2351,7 +2348,7 @@ function PlansList({ equipment, user, showToast, setConfirmModal }: { equipment:
           <div key={plan.id} className="p-4 bg-zinc-50 rounded-xl border border-zinc-100">
             <div className="flex justify-between items-start mb-2">
               <div className="flex-1 min-w-0">
-                <p className="font-bold text-zinc-900 truncate">{plan.description}</p>
+                <p className="font-bold text-zinc-900">{plan.description}</p>
                 <div className="flex items-center gap-3">
                   <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest shrink-0">Intervalo: {plan.intervalHours}h</p>
                   <p className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full border shrink-0 ${
@@ -2367,7 +2364,7 @@ function PlansList({ equipment, user, showToast, setConfirmModal }: { equipment:
                     </p>
                   )}
                   {calculateDaysRemaining(plan) !== null && (
-                    <p className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full border truncate ${
+                    <p className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full border ${
                       (calculateDaysRemaining(plan) || 0) <= 7 ? 'text-red-600 bg-red-50 border-red-100' : 
                       (calculateDaysRemaining(plan) || 0) <= 15 ? 'text-orange-600 bg-orange-50 border-orange-100' : 
                       'text-emerald-600 bg-emerald-50 border-emerald-100'
@@ -2771,12 +2768,12 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
                   {record.status === 'in-progress' ? <Clock /> : record.status === 'completed' ? <CheckCircle2 /> : <AlertCircle />}
                 </div>
                 <div className="min-w-0">
-                  <h4 className="font-bold text-zinc-900 truncate">
+                  <h4 className="font-bold text-zinc-900">
                     {record.orderNumber && <span className="text-blue-600 mr-2">OS N°{String(record.orderNumber).padStart(5, '0')}</span>}
                     {record.equipmentName}
                   </h4>
                   <div className="flex items-center gap-2 min-w-0">
-                    <p className="text-sm text-zinc-500 truncate flex-1 min-w-0">{record.planDescription}</p>
+                    <p className="text-sm text-zinc-500 flex-1 min-w-0">{record.planDescription}</p>
                     {record.criticality && (
                       <span className={`text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded border shrink-0 ${
                         record.criticality === 'high' ? 'text-red-600 bg-red-50 border-red-100' : 
