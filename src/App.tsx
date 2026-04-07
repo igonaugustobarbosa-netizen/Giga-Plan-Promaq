@@ -2486,7 +2486,7 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
   }, [selectedEquipId]);
 
   useEffect(() => {
-    if (selectedEquipId && selectedPlanId) {
+    if (selectedEquipId) {
       const equip = equipment.find(e => e.id === selectedEquipId);
       const plan = plans.find(p => p.id === selectedPlanId);
       
@@ -2507,6 +2507,8 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
         } else {
           setCalculatedStartDate(format(new Date(), 'yyyy-MM-dd'));
         }
+      } else {
+        setCalculatedStartDate(format(new Date(), 'yyyy-MM-dd'));
       }
     }
   }, [selectedEquipId, selectedPlanId, equipment, plans, records]);
@@ -2517,7 +2519,13 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
     const equip = equipment.find(e => e.id === selectedEquipId);
     const plan = plans.find(p => p.id === selectedPlanId);
     
-    if (!equip || !plan) return;
+    if (!equip) return;
+
+    const manualDescription = formData.get('manualDescription') as string;
+    if (!plan && !manualDescription) {
+      showToast("Selecione um plano ou informe uma descrição para a manutenção.", "error");
+      return;
+    }
 
     const usedParts = selectedParts.map(sp => {
       const part = equipmentParts.find(p => p.id === sp.partId);
@@ -2536,10 +2544,10 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
     const data: any = {
       equipmentId: selectedEquipId,
       equipmentName: equip.name,
-      planId: selectedPlanId,
-      planDescription: plan.description,
-      criticality: (formData.get('criticality') as any) || plan.criticality || 'medium',
-      executor: (formData.get('executor') as string) || plan.executor || 'N/A',
+      planId: selectedPlanId || 'manual',
+      planDescription: plan?.description || manualDescription,
+      criticality: (formData.get('criticality') as any) || plan?.criticality || 'medium',
+      executor: (formData.get('executor') as string) || plan?.executor || 'N/A',
       status: 'in-progress',
       startDate: new Date().toISOString(),
       scheduledStartDate: formData.get('scheduledStartDate') as string,
@@ -2601,8 +2609,10 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
 
     const totalPartsCost = usedParts.reduce((acc, p) => acc + (p.quantity * p.unitCost), 0);
     const totalLaborCost = Number(formData.get('totalLaborCost'));
+    const manualDescription = formData.get('manualDescription') as string;
 
     const update: any = {
+      planDescription: manualDescription || editingRecord.planDescription,
       criticality: formData.get('criticality') as any,
       executor: formData.get('executor') as string,
       scheduledStartDate: formData.get('scheduledStartDate') as string,
@@ -2684,7 +2694,7 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
 
   const handleRepeatMaintenance = (record: MaintenanceRecord) => {
     setSelectedEquipId(record.equipmentId);
-    setSelectedPlanId(record.planId);
+    setSelectedPlanId(record.planId === 'manual' ? '' : record.planId);
     setIsModalOpen(true);
   };
 
@@ -2891,11 +2901,19 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
             onChange={(e: any) => setSelectedPlanId(e.target.value)}
             disabled={!selectedEquipId}
             options={[
-              { value: '', label: 'Selecione um plano' },
+              { value: '', label: 'Manutenção Avulsa (Sem Plano)' },
               ...plans.map(p => ({ value: p.id, label: p.description }))
             ]}
-            required
           />
+
+          {!selectedPlanId && selectedEquipId && (
+            <Input 
+              label="Descrição da Manutenção Avulsa" 
+              name="manualDescription" 
+              placeholder="Ex: Troca de mangueira estourada" 
+              required 
+            />
+          )}
 
           <Select 
             label="Nível de Criticidade" 
@@ -3114,6 +3132,15 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
               <p className="font-bold text-zinc-900">{editingRecord.equipmentName}</p>
               <p className="text-sm text-zinc-500">{editingRecord.planDescription}</p>
             </div>
+
+            {editingRecord.planId === 'manual' && (
+              <Input 
+                label="Descrição da Manutenção" 
+                name="manualDescription" 
+                defaultValue={editingRecord.planDescription}
+                required 
+              />
+            )}
 
             <Select 
               label="Nível de Criticidade" 
