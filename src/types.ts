@@ -44,6 +44,14 @@ export interface Part {
   cost: number;
 }
 
+export interface Service {
+  id: string;
+  equipmentId: string;
+  name: string;
+  description: string;
+  cost: number;
+}
+
 export interface MaintenancePlan {
   id: string;
   equipmentId: string;
@@ -54,6 +62,7 @@ export interface MaintenancePlan {
     partId: string;
     quantity: number;
   }[];
+  servicesRequired: string[]; // Array of service IDs
   criticality: 'low' | 'medium' | 'high';
   executor?: 'operador' | 'mecânico' | 'eletricista';
 }
@@ -65,6 +74,13 @@ export interface UsedPart {
   name: string;
   quantity: number;
   unitCost: number;
+}
+
+export interface UsedService {
+  serviceId: string;
+  name: string;
+  description: string;
+  cost: number;
 }
 
 export interface MaintenanceRecord {
@@ -79,12 +95,13 @@ export interface MaintenanceRecord {
   scheduledStartTime?: string;
   scheduledEndTime?: string;
   totalPartsCost?: number;
-  totalLaborCost?: number;
+  totalServicesCost?: number;
   hourMeter?: number;
   kmMeter?: number;
   avgHoursPerDay?: number;
   avgKmPerDay?: number;
   usedParts?: UsedPart[];
+  usedServices?: UsedService[];
   notes?: string;
   // Denormalized for reports
   equipmentName?: string;

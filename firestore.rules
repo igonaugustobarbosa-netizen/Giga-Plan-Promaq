@@ -5,7 +5,7 @@ service cloud.firestore {
     // Assumed Data Model
     // ===============================================================
     // Collection: users
-    // Fields: uid, username, password, name, role (admin, supervisor, operator)
+    // Fields: uid, username, password, name, role (admin, supervisor, operator, gestor)
     //
     // Collection: equipment
     // Fields: name, model, serialNumber, technicalInfo, photoUrl, manualUrl, createdAt
@@ -42,7 +42,7 @@ service cloud.firestore {
     function isSupervisor() {
       return isAuthenticated() && (
         isAdmin() ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().role == 'supervisor')
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (getUserData().role == 'supervisor' || getUserData().role == 'gestor'))
       );
     }
 
@@ -59,7 +59,7 @@ service cloud.firestore {
 
     function isValidUser(data) {
       return data.keys().hasAll(['username', 'role', 'name']) &&
-             data.role in ['admin', 'supervisor', 'operator'] &&
+             data.role in ['admin', 'supervisor', 'operator', 'gestor'] &&
              data.username is string &&
              data.name is string &&
              (!('password' in data) || data.password is string);

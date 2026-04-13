@@ -8,7 +8,7 @@
         "uid": { "type": "string" },
         "email": { "type": "string", "format": "email" },
         "name": { "type": "string" },
-        "role": { "type": "string", "enum": ["admin", "supervisor", "operator"] }
+        "role": { "type": "string", "enum": ["admin", "supervisor", "operator", "gestor"] }
       },
       "required": ["uid", "email", "role"]
     },
@@ -50,10 +50,23 @@
       "properties": {
         "equipmentId": { "type": "string" },
         "name": { "type": "string" },
+        "description": { "type": "string" },
         "code": { "type": "string" },
         "cost": { "type": "number" }
       },
       "required": ["equipmentId", "name", "code", "cost"]
+    },
+    "Service": {
+      "title": "Service",
+      "description": "Services or labor items for equipment",
+      "type": "object",
+      "properties": {
+        "equipmentId": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "cost": { "type": "number" }
+      },
+      "required": ["equipmentId", "name", "cost"]
     },
     "MaintenancePlan": {
       "title": "Maintenance Plan",
@@ -74,6 +87,10 @@
               "quantity": { "type": "number" }
             }
           }
+        },
+        "servicesRequired": {
+          "type": "array",
+          "items": { "type": "string" }
         }
       },
       "required": ["equipmentId", "description", "intervalHours"]
@@ -89,7 +106,7 @@
         "startDate": { "type": "string", "format": "date-time" },
         "endDate": { "type": "string", "format": "date-time" },
         "totalPartsCost": { "type": "number" },
-        "totalLaborCost": { "type": "number" },
+        "totalServicesCost": { "type": "number" },
         "usedParts": {
           "type": "array",
           "items": {
@@ -99,6 +116,18 @@
               "name": { "type": "string" },
               "quantity": { "type": "number" },
               "unitCost": { "type": "number" }
+            }
+          }
+        },
+        "usedServices": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "serviceId": { "type": "string" },
+              "name": { "type": "string" },
+              "description": { "type": "string" },
+              "cost": { "type": "number" }
             }
           }
         },
@@ -132,6 +161,10 @@
     "/equipment/{equipmentId}/parts/{partId}": {
       "schema": "Part",
       "description": "Parts subcollection"
+    },
+    "/equipment/{equipmentId}/services/{serviceId}": {
+      "schema": "Service",
+      "description": "Services subcollection"
     },
     "/equipment/{equipmentId}/plans/{planId}": {
       "schema": "MaintenancePlan",

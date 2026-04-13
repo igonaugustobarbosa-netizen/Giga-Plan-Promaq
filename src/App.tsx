@@ -68,7 +68,7 @@ import {
 import { QRCodeSVG } from 'qrcode.react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format, addHours, isAfter, parseISO, subDays, differenceInDays } from 'date-fns';
-import { UserProfile, Equipment, Part, MaintenancePlan, MaintenanceRecord, UserRole, MaintenanceStatus, AppNotification, Customer } from './types';
+import { UserProfile, Equipment, Part, Service, MaintenancePlan, MaintenanceRecord, UserRole, MaintenanceStatus, AppNotification, Customer } from './types';
 
 // --- Utilities ---
 
@@ -526,65 +526,65 @@ export default function App() {
 
     // Header
     doc.setFillColor(240, 240, 240);
-    doc.rect(0, 0, 210, 30, 'F');
+    doc.rect(0, 0, 210, 15, 'F');
     doc.setTextColor(0, 0, 0);
-    doc.setFontSize(20);
+    doc.setFontSize(14);
     doc.setFont('helvetica', 'bold');
-    doc.text(company?.name || 'GIGA Plan Promaq', 14, 12);
-    doc.setFontSize(12);
+    doc.text(company?.name || 'GIGA Plan Promaq', 14, 6);
+    doc.setFontSize(8);
     doc.setFont('helvetica', 'normal');
-    doc.text('Ordem de Serviço de Manutenção', 14, 22);
+    doc.text('Ordem de Serviço de Manutenção', 14, 11);
     
     doc.setTextColor(60, 60, 60);
-    doc.setFontSize(8);
-    doc.text('GIGA Plan Promaq', 160, 8);
-    doc.setFontSize(9);
-    doc.text(`OS N°${record.orderNumber ? String(record.orderNumber).padStart(5, '0') : 'N/A'}`, 160, 15);
-    doc.text(`Data: ${format(new Date(), 'dd/MM/yyyy HH:mm')}`, 160, 22);
+    doc.setFontSize(6);
+    doc.text('GIGA Plan Promaq', 160, 5);
+    doc.setFontSize(7);
+    doc.text(`OS N°${record.orderNumber ? String(record.orderNumber).padStart(5, '0') : 'N/A'}`, 160, 9);
+    doc.text(`Data: ${format(new Date(), 'dd/MM/yyyy HH:mm')}`, 160, 13);
 
     doc.setTextColor(0, 0, 0);
-    let currentY = 45;
+    let currentY = 22;
 
     // Equipment Info Section
-    doc.setFontSize(14);
+    doc.setFontSize(10);
     doc.setFont('helvetica', 'bold');
     doc.text('1. Informações do Equipamento', 14, currentY);
     doc.setDrawColor(200, 200, 200);
-    doc.line(14, currentY + 2, 196, currentY + 2);
+    doc.line(14, currentY + 1.5, 196, currentY + 1.5);
     
-    currentY += 12;
-    doc.setFontSize(10);
+    currentY += 7;
+    doc.setFontSize(8);
     doc.setFont('helvetica', 'bold');
     doc.text('Nome:', 14, currentY);
     doc.setFont('helvetica', 'normal');
     doc.text(record.equipmentName || 'N/A', 45, currentY);
     
-    currentY += 7;
+    currentY += 4.5;
     doc.setFont('helvetica', 'bold');
     doc.text('Modelo:', 14, currentY);
     doc.setFont('helvetica', 'normal');
     doc.text(equip?.model || 'N/A', 45, currentY);
     
-    currentY += 7;
+    currentY += 4.5;
     doc.setFont('helvetica', 'bold');
     doc.text('Série:', 14, currentY);
     doc.setFont('helvetica', 'normal');
     doc.text(equip?.serialNumber || 'N/A', 45, currentY);
     
-    currentY += 7;
+    currentY += 4.5;
     doc.setFont('helvetica', 'bold');
     doc.text('Horímetro/KM:', 14, currentY);
     doc.setFont('helvetica', 'normal');
     doc.text(`${equip?.currentHours || 0}h / ${equip?.currentKm || 0}km`, 45, currentY);
 
     if (company) {
-      currentY += 7;
+      currentY += 4.5;
       doc.setFont('helvetica', 'bold');
       doc.text('Empresa:', 14, currentY);
       doc.setFont('helvetica', 'normal');
       doc.text(company.name, 45, currentY);
       
-      currentY += 7;
+      currentY += 4.5;
       doc.setFont('helvetica', 'bold');
       doc.text('Contato:', 14, currentY);
       doc.setFont('helvetica', 'normal');
@@ -596,36 +596,36 @@ export default function App() {
       try {
         const imgData = await getImageData(equip.photoUrl);
         // Position photo on the right side of equipment info
-        doc.addImage(imgData, 'JPEG', 140, 50, 50, 50);
-        doc.setDrawColor(0);
-        doc.rect(140, 50, 50, 50); // Border for photo
+        doc.addImage(imgData, 'JPEG', 155, 20, 35, 35);
+        doc.setDrawColor(200); // Light gray border
+        doc.rect(155, 20, 35, 35); // Border for photo
       } catch (e) {
         console.warn('Could not add equipment photo to PDF', e);
       }
     }
 
-    currentY = Math.max(currentY + 15, 110);
+    currentY = Math.max(currentY + 8, 75);
 
     // Maintenance Details Section
-    doc.setFontSize(14);
+    doc.setFontSize(12);
     doc.setFont('helvetica', 'bold');
     doc.text('2. Detalhes da Manutenção', 14, currentY);
     doc.line(14, currentY + 2, 196, currentY + 2);
     
-    currentY += 12;
-    doc.setFontSize(10);
+    currentY += 10;
+    doc.setFontSize(9);
     doc.setFont('helvetica', 'bold');
     doc.text('Plano:', 14, currentY);
     doc.setFont('helvetica', 'normal');
     doc.text(record.planDescription || 'N/A', 45, currentY);
     
-    currentY += 7;
+    currentY += 6;
     doc.setFont('helvetica', 'bold');
     doc.text('Executor:', 14, currentY);
     doc.setFont('helvetica', 'normal');
     doc.text(record.executor || 'N/A', 45, currentY);
     
-    currentY += 7;
+    currentY += 6;
     doc.setFont('helvetica', 'bold');
     doc.text('Criticidade:', 14, currentY);
     const critLabel = record.criticality === 'high' ? 'ALTA' : record.criticality === 'medium' ? 'MÉDIA' : 'BAIXA';
@@ -634,141 +634,177 @@ export default function App() {
     doc.text(critLabel, 45, currentY);
     doc.setTextColor(0, 0, 0);
     
-    currentY += 7;
+    currentY += 6;
     doc.setFont('helvetica', 'bold');
     doc.text('Status:', 14, currentY);
     doc.setFont('helvetica', 'normal');
     doc.text(record.status === 'in-progress' ? 'Em Andamento' : record.status === 'completed' ? 'Concluída' : 'Programada', 45, currentY);
     
-    currentY += 7;
+    currentY += 6;
     doc.setFont('helvetica', 'bold');
     doc.text('Início:', 14, currentY);
     doc.setFont('helvetica', 'normal');
     doc.text(format(parseISO(record.startDate), 'dd/MM/yyyy HH:mm'), 45, currentY);
 
     if (record.scheduledStartDate) {
-      currentY += 7;
+      currentY += 6;
       doc.setFont('helvetica', 'bold');
       doc.text('Programado:', 14, currentY);
       doc.setFont('helvetica', 'normal');
       doc.text(format(parseISO(record.scheduledStartDate + 'T00:00:00'), 'dd/MM/yyyy'), 45, currentY);
     }
 
-    currentY += 15;
+    currentY += 12;
 
     // Work Description
     if (plan?.workDescription) {
-      doc.setFontSize(14);
+      doc.setFontSize(12);
       doc.setFont('helvetica', 'bold');
       doc.text('3. Trabalhos a serem Realizados', 14, currentY);
       doc.line(14, currentY + 2, 196, currentY + 2);
       
-      currentY += 10;
-      doc.setFontSize(10);
+      currentY += 8;
+      doc.setFontSize(9);
       doc.setFont('helvetica', 'normal');
+      doc.setLineHeightFactor(1.1);
       const splitWork = doc.splitTextToSize(plan.workDescription, 180);
       doc.text(splitWork, 14, currentY);
-      currentY += (splitWork.length * 5) + 10;
+      currentY += (splitWork.length * 4) + 8;
+      doc.setLineHeightFactor(1.15); // Reset to default
     }
 
     // Parts Section
     if (record.usedParts && record.usedParts.length > 0) {
-      if (currentY > 240) { doc.addPage(); currentY = 20; }
-      doc.setFontSize(14);
+      if (currentY > 250) { doc.addPage(); currentY = 20; }
+      doc.setFontSize(12);
       doc.setFont('helvetica', 'bold');
       doc.text('4. Peças Utilizadas', 14, currentY);
       doc.line(14, currentY + 2, 196, currentY + 2);
       
-      currentY += 10;
-      doc.setFontSize(9);
+      currentY += 8;
+      doc.setFontSize(8);
       // Table Header
       doc.setFillColor(240, 240, 240);
-      doc.rect(14, currentY, 182, 7, 'F');
+      doc.rect(14, currentY, 182, 6, 'F');
       doc.setFont('helvetica', 'bold');
-      doc.text('Descrição da Peça', 16, currentY + 5);
-      doc.text('Qtd', 100, currentY + 5);
+      doc.text('Descrição da Peça', 16, currentY + 4);
+      doc.text('Qtd', 100, currentY + 4);
       if (!isOperator) {
-        doc.text('V. Unit', 130, currentY + 5);
-        doc.text('V. Total', 165, currentY + 5);
+        doc.text('V. Unit', 130, currentY + 4);
+        doc.text('V. Total', 165, currentY + 4);
       }
       
-      currentY += 12;
+      currentY += 10;
       doc.setFont('helvetica', 'normal');
       record.usedParts.forEach((p) => {
-        if (currentY > 270) { doc.addPage(); currentY = 20; }
+        if (currentY > 275) { doc.addPage(); currentY = 20; }
         doc.text(p.name, 16, currentY);
         doc.text(p.quantity.toString(), 100, currentY);
         if (!isOperator) {
           doc.text(`R$ ${p.unitCost.toFixed(2)}`, 130, currentY);
           doc.text(`R$ ${(p.unitCost * p.quantity).toFixed(2)}`, 165, currentY);
         }
+        currentY += 5;
+      });
+      currentY += 8;
+    }
+
+    // Services Section
+    if (record.usedServices && record.usedServices.length > 0) {
+      if (currentY > 260) { doc.addPage(); currentY = 20; }
+      doc.setFontSize(12);
+      doc.setFont('helvetica', 'bold');
+      doc.text('5. Serviços Realizados', 14, currentY);
+      doc.line(14, currentY + 2, 196, currentY + 2);
+      
+      currentY += 8;
+      doc.setFontSize(8);
+      doc.text('Serviço', 16, currentY);
+      doc.text('Descrição', 60, currentY);
+      if (!isOperator) {
+        doc.text('Valor', 165, currentY);
+      }
+      currentY += 4;
+      doc.line(14, currentY, 196, currentY);
+      currentY += 6;
+
+      doc.setFont('helvetica', 'normal');
+      record.usedServices.forEach(s => {
+        if (currentY > 275) { doc.addPage(); currentY = 20; }
+        doc.text(s.name, 16, currentY);
+        doc.text(s.description || '', 60, currentY, { maxWidth: 100 });
+        if (!isOperator) {
+          doc.text(`R$ ${s.cost.toFixed(2)}`, 165, currentY);
+        }
         currentY += 6;
       });
-      currentY += 10;
+      currentY += 8;
     }
 
     // Costs Summary
     if (!isOperator) {
-      if (currentY > 240) { doc.addPage(); currentY = 20; }
-      doc.setFontSize(14);
+      if (currentY > 250) { doc.addPage(); currentY = 20; }
+      doc.setFontSize(12);
       doc.setFont('helvetica', 'bold');
       doc.text('5. Resumo de Custos', 14, currentY);
       doc.line(14, currentY + 2, 196, currentY + 2);
       
-      currentY += 12;
-      doc.setFontSize(10);
+      currentY += 10;
+      doc.setFontSize(9);
       doc.setFont('helvetica', 'normal');
       doc.text('Custo Total de Peças:', 14, currentY);
       doc.text(`R$ ${(record.totalPartsCost || 0).toFixed(2)}`, 60, currentY);
       
-      currentY += 7;
-      doc.text('Custo de Mão de Obra:', 14, currentY);
-      doc.text(`R$ ${(record.totalLaborCost || 0).toFixed(2)}`, 60, currentY);
+      currentY += 6;
+      doc.text('Custo de Serviços:', 14, currentY);
+      doc.text(`R$ ${(record.totalServicesCost || 0).toFixed(2)}`, 60, currentY);
       
-      currentY += 10;
-      doc.setFontSize(12);
+      currentY += 8;
+      doc.setFontSize(11);
       doc.setFont('helvetica', 'bold');
       doc.setFillColor(245, 245, 245);
-      doc.rect(14, currentY - 5, 182, 10, 'F');
-      doc.text('TOTAL GERAL DA ORDEM:', 16, currentY + 2);
-      doc.text(`R$ ${((record.totalPartsCost || 0) + (record.totalLaborCost || 0)).toFixed(2)}`, 140, currentY + 2);
-      currentY += 15;
+      doc.rect(14, currentY - 5, 182, 8, 'F');
+      doc.text('TOTAL GERAL DA ORDEM:', 16, currentY + 1);
+      doc.text(`R$ ${((record.totalPartsCost || 0) + (record.totalServicesCost || 0)).toFixed(2)}`, 140, currentY + 1);
+      currentY += 12;
     }
 
     // Notes
     if (record.notes) {
-      doc.addPage();
-      currentY = 20;
-      doc.setFontSize(14);
+      if (currentY > 240) { doc.addPage(); currentY = 20; }
+      else { currentY += 8; }
+      doc.setFontSize(12);
       doc.setFont('helvetica', 'bold');
       doc.text('Observações Técnicas / Relatório', 14, currentY);
       doc.line(14, currentY + 2, 196, currentY + 2);
       
-      currentY += 10;
-      doc.setFontSize(10);
+      currentY += 8;
+      doc.setFontSize(9);
       doc.setFont('helvetica', 'normal');
+      doc.setLineHeightFactor(1.1);
       const splitNotes = doc.splitTextToSize(record.notes, 180);
       doc.text(splitNotes, 14, currentY);
-      currentY += (splitNotes.length * 5) + 20;
+      currentY += (splitNotes.length * 4) + 10;
+      doc.setLineHeightFactor(1.15); // Reset to default
     } else {
-      currentY += 30;
+      currentY += 15;
     }
 
     // Signatures
-    if (currentY > 240) { doc.addPage(); currentY = 40; }
+    if (currentY > 250) { doc.addPage(); currentY = 40; }
     doc.setDrawColor(150);
-    doc.line(20, currentY + 15, 90, currentY + 15);
-    doc.setFontSize(8);
-    doc.text('Assinatura do Técnico', 35, currentY + 20);
+    doc.line(20, currentY + 8, 90, currentY + 8);
+    doc.setFontSize(7);
+    doc.text('Assinatura do Técnico', 35, currentY + 12);
     
-    doc.line(120, currentY + 15, 190, currentY + 15);
-    doc.text('Assinatura da Empresa / Responsável', 125, currentY + 20);
+    doc.line(120, currentY + 8, 190, currentY + 8);
+    doc.text('Assinatura da Empresa / Responsável', 125, currentY + 12);
 
     // Footer on all pages
     const pageCount = doc.getNumberOfPages();
     for (let i = 1; i <= pageCount; i++) {
       doc.setPage(i);
-      doc.setFontSize(8);
+      doc.setFontSize(7);
       doc.setTextColor(150);
       const footerText = 'GIGA Plan Promaq - Sistema de Gestão de Manutenção | Desenvolvedor: Giga Elétrica | 43 996118806';
       doc.text(footerText, 14, 285);
@@ -793,7 +829,7 @@ export default function App() {
   };
 
   const handleDeleteMaintenance = async (id: string) => {
-    if (user?.role === 'supervisor' || user?.role === 'operator') {
+    if (user?.role === 'operator') {
       showToast("Você não tem permissão para excluir registros de manutenção.", "error");
       return;
     }
@@ -1370,7 +1406,7 @@ function Dashboard({ equipment, records, user, onDeleteRecord, allPlans, searchT
                       >
                         <FileText size={18} />
                       </button>
-                      {user.role !== 'operator' && user.role !== 'supervisor' && (
+                      {user.role !== 'operator' && (
                         <button 
                           onClick={() => onDeleteRecord(record.id)}
                           className="p-2 text-zinc-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
@@ -1990,6 +2026,7 @@ function EquipmentSection({ equipment, records, user, initialEquipId, onClearIni
             )}
             
             <PartsList equipmentId={viewingItem.id} equipmentName={viewingItem.name} user={user} searchTerm={searchTerm} showToast={showToast} setConfirmModal={setConfirmModal} />
+            <ServicesList equipmentId={viewingItem.id} user={user} searchTerm={searchTerm} showToast={showToast} setConfirmModal={setConfirmModal} />
             <PlansList equipment={viewingItem} user={user} showToast={showToast} setConfirmModal={setConfirmModal} />
           </div>
         )}
@@ -2130,14 +2167,148 @@ function PartsList({ equipmentId, equipmentName, user, searchTerm, showToast, se
   );
 }
 
+function ServicesList({ equipmentId, user, searchTerm, showToast, setConfirmModal }: { equipmentId: string, user: UserProfile, searchTerm: string, showToast: (m: string, t?: any) => void, setConfirmModal: any }) {
+  const [services, setServices] = useState<Service[]>([]);
+  const [isAdding, setIsAdding] = useState(false);
+  const [editingService, setEditingService] = useState<Service | null>(null);
+
+  useEffect(() => {
+    const q = query(collection(db, 'equipment', equipmentId, 'services'));
+    return onSnapshot(q, (snapshot) => {
+      setServices(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Service)));
+    });
+  }, [equipmentId]);
+
+  const filteredServices = services.filter(service => 
+    service.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    service.description.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const handleAddService = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (user.role === 'operator') {
+      showToast("Você não tem permissão para realizar esta ação.", "error");
+      return;
+    }
+    const formData = new FormData(e.currentTarget);
+    const data = {
+      equipmentId,
+      name: formData.get('name') as string,
+      description: formData.get('description') as string,
+      cost: Number(formData.get('cost'))
+    };
+    
+    try {
+      if (editingService) {
+        await updateDoc(doc(db, 'equipment', equipmentId, 'services', editingService.id), data);
+        showToast("Serviço atualizado com sucesso.", "success");
+      } else {
+        await addDoc(collection(db, 'equipment', equipmentId, 'services'), data);
+        showToast("Serviço adicionado com sucesso.", "success");
+      }
+      setIsAdding(false);
+      setEditingService(null);
+    } catch (error) {
+      console.error("Error saving service:", error);
+      showToast("Erro ao salvar serviço.", "error");
+    }
+  };
+
+  const handleDeleteService = (service: Service) => {
+    if (user.role === 'operator') {
+      showToast("Você não tem permissão para realizar esta ação.", "error");
+      return;
+    }
+    setConfirmModal({
+      isOpen: true,
+      title: 'Excluir Serviço',
+      message: `Tem certeza que deseja excluir o serviço "${service.name}"? Esta ação não pode ser desfeita.`,
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'equipment', equipmentId, 'services', service.id));
+          showToast("Serviço excluído com sucesso.", "success");
+        } catch (error) {
+          console.error("Error deleting service:", error);
+          showToast("Erro ao excluir serviço.", "error");
+        }
+      }
+    });
+  };
+
+  return (
+    <div className="space-y-4 border-t border-zinc-100 pt-6">
+      <div className="flex items-center justify-between">
+        <h5 className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Serviços e Mão de Obra</h5>
+        {user.role !== 'operator' && (
+          <button onClick={() => { setIsAdding(true); setEditingService(null); }} className="text-xs font-bold text-black hover:underline flex items-center gap-1">
+            <Plus size={12} /> Adicionar Serviço
+          </button>
+        )}
+      </div>
+
+      {(isAdding || editingService) && (
+        <form onSubmit={handleAddService} className="p-4 bg-zinc-50 rounded-xl grid grid-cols-3 gap-3">
+          <Input label="Nome do Serviço" name="name" defaultValue={editingService?.name} required />
+          <Input label="Descrição" name="description" defaultValue={editingService?.description} required />
+          <Input label="Valor (R$)" name="cost" type="number" step="0.01" defaultValue={editingService?.cost} required />
+          <div className="col-span-3 flex justify-end gap-2">
+            <Button variant="ghost" className="text-xs" onClick={() => { setIsAdding(false); setEditingService(null); }}>Cancelar</Button>
+            <Button type="submit" className="text-xs">{editingService ? 'Atualizar' : 'Salvar'}</Button>
+          </div>
+        </form>
+      )}
+
+      <div className="space-y-2">
+        {filteredServices.map(service => (
+          <div key={service.id} className="flex items-center justify-between p-3 bg-white border border-zinc-100 rounded-lg text-sm group">
+            <div className="flex-1">
+              <p className="font-bold">{service.name}</p>
+              <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider">{service.description}</p>
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="text-right">
+                {!user.role || user.role !== 'operator' ? (
+                  <p className="font-bold text-zinc-900">R$ {service.cost.toFixed(2)}</p>
+                ) : (
+                  <p className="text-[10px] text-zinc-400 italic italic">Valor restrito</p>
+                )}
+              </div>
+              {user.role !== 'operator' && (
+                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button 
+                    onClick={() => { setEditingService(service); setIsAdding(false); }}
+                    className="p-1.5 text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100 rounded-lg transition-all"
+                    title="Editar"
+                  >
+                    <Edit3 size={14} />
+                  </button>
+                  <button 
+                    onClick={() => handleDeleteService(service)}
+                    className="p-1.5 text-zinc-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                    title="Excluir"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function PlansList({ equipment, user, showToast, setConfirmModal }: { equipment: Equipment, user: UserProfile, showToast: (m: string, t?: any) => void, setConfirmModal: any }) {
   const equipmentId = equipment.id;
   const [plans, setPlans] = useState<MaintenancePlan[]>([]);
   const [parts, setParts] = useState<Part[]>([]);
+  const [services, setServices] = useState<Service[]>([]);
   const [lastRecords, setLastRecords] = useState<Record<string, MaintenanceRecord>>({});
   const [isAdding, setIsAdding] = useState(false);
   const [editingPlan, setEditingPlan] = useState<MaintenancePlan | null>(null);
   const [selectedParts, setSelectedParts] = useState<{ partId: string, quantity: number }[]>([]);
+  const [selectedServices, setSelectedServices] = useState<string[]>([]);
 
   useEffect(() => {
     const qPlans = query(collection(db, 'equipment', equipmentId, 'plans'));
@@ -2148,6 +2319,11 @@ function PlansList({ equipment, user, showToast, setConfirmModal }: { equipment:
     const qParts = query(collection(db, 'equipment', equipmentId, 'parts'));
     const unsubParts = onSnapshot(qParts, (snapshot) => {
       setParts(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Part)));
+    });
+
+    const qServices = query(collection(db, 'equipment', equipmentId, 'services'));
+    const unsubServices = onSnapshot(qServices, (snapshot) => {
+      setServices(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Service)));
     });
 
     const qRecords = query(
@@ -2168,6 +2344,7 @@ function PlansList({ equipment, user, showToast, setConfirmModal }: { equipment:
     return () => {
       unsubPlans();
       unsubParts();
+      unsubServices();
       unsubRecords();
     };
   }, [equipmentId]);
@@ -2198,7 +2375,8 @@ function PlansList({ equipment, user, showToast, setConfirmModal }: { equipment:
       intervalHours: Number(formData.get('intervalHours')),
       criticality: formData.get('criticality') as 'low' | 'medium' | 'high',
       executor: formData.get('executor') as 'operador' | 'mecânico' | 'eletricista',
-      partsRequired: selectedParts.filter(p => p.quantity > 0)
+      partsRequired: selectedParts.filter(p => p.quantity > 0),
+      servicesRequired: selectedServices
     };
     try {
       if (editingPlan) {
@@ -2211,6 +2389,7 @@ function PlansList({ equipment, user, showToast, setConfirmModal }: { equipment:
       setIsAdding(false);
       setEditingPlan(null);
       setSelectedParts([]);
+      setSelectedServices([]);
     } catch (error) {
       console.error("Erro ao salvar plano:", error);
       showToast("Erro ao salvar o plano. Verifique os campos e tente novamente.", "error");
@@ -2322,6 +2501,33 @@ function PlansList({ equipment, user, showToast, setConfirmModal }: { equipment:
               </div>
             ) : (
               <p className="text-[10px] text-zinc-400 italic">Cadastre peças primeiro para selecioná-las no plano.</p>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Serviços Necessários para este Plano</p>
+            {services.length > 0 ? (
+              <div className="grid grid-cols-1 gap-2 max-h-40 overflow-y-auto pr-2">
+                {services.map(service => {
+                  const isSelected = selectedServices.includes(service.id);
+                  return (
+                    <div key={service.id} className="flex items-center justify-between p-2 bg-white rounded-lg border border-zinc-100">
+                      <span className="text-xs font-medium">{service.name}</span>
+                      <input 
+                        type="checkbox" 
+                        checked={isSelected}
+                        className="w-4 h-4 rounded border-zinc-300 text-black focus:ring-black"
+                        onChange={(e) => {
+                          if (e.target.checked) setSelectedServices(prev => [...prev, service.id]);
+                          else setSelectedServices(prev => prev.filter(id => id !== service.id));
+                        }}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-[10px] text-zinc-400 italic">Cadastre serviços primeiro para selecioná-los no plano.</p>
             )}
           </div>
 
@@ -2451,7 +2657,13 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
   const [selectedPlanId, setSelectedPlanId] = useState('');
   const [plans, setPlans] = useState<MaintenancePlan[]>([]);
   const [equipmentParts, setEquipmentParts] = useState<Part[]>([]);
+  const [equipmentServices, setEquipmentServices] = useState<Service[]>([]);
   const [selectedParts, setSelectedParts] = useState<{ partId: string, quantity: number }[]>([]);
+  const [selectedServices, setSelectedServices] = useState<string[]>([]);
+  const [manualParts, setManualParts] = useState<{ name: string, quantity: number, unitCost: number }[]>([]);
+  const [manualServices, setManualServices] = useState<{ name: string, description: string, cost: number }[]>([]);
+  const [newManualPart, setNewManualPart] = useState({ name: '', quantity: 1, unitCost: 0 });
+  const [newManualService, setNewManualService] = useState({ name: '', description: '', cost: 0 });
   const [calculatedStartDate, setCalculatedStartDate] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'planned' | 'in-progress' | 'completed'>(qrEquipId ? 'in-progress' : 'all');
   const [criticalityFilter, setCriticalityFilter] = useState<'all' | 'low' | 'medium' | 'high'>('all');
@@ -2475,9 +2687,15 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
         setEquipmentParts(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Part)));
       });
 
+      const qServices = query(collection(db, 'equipment', selectedEquipId, 'services'));
+      const unsubServices = onSnapshot(qServices, (snapshot) => {
+        setEquipmentServices(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Service)));
+      });
+
       return () => {
         unsubPlans();
         unsubParts();
+        unsubServices();
       };
     } else {
       setPlans([]);
@@ -2527,18 +2745,45 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
       return;
     }
 
-    const usedParts = selectedParts.map(sp => {
-      const part = equipmentParts.find(p => p.id === sp.partId);
-      return {
-        partId: sp.partId,
-        name: part?.name || '',
-        quantity: sp.quantity,
-        unitCost: part?.cost || 0
-      };
-    }).filter(p => p.quantity > 0);
+    const usedParts = [
+      ...selectedParts.map(sp => {
+        const part = equipmentParts.find(p => p.id === sp.partId);
+        return {
+          partId: sp.partId,
+          name: part?.name || '',
+          quantity: sp.quantity,
+          unitCost: part?.cost || 0
+        };
+      }),
+      ...manualParts.map(mp => ({
+        partId: 'manual',
+        name: mp.name,
+        quantity: mp.quantity,
+        unitCost: mp.unitCost
+      }))
+    ].filter(p => p.quantity > 0);
 
     const totalPartsCost = usedParts.reduce((acc, p) => acc + (p.quantity * p.unitCost), 0);
-    const totalLaborCost = Number(formData.get('totalLaborCost'));
+    
+    const usedServices = [
+      ...selectedServices.map(sid => {
+        const service = equipmentServices.find(s => s.id === sid);
+        return {
+          serviceId: sid,
+          name: service?.name || '',
+          description: service?.description || '',
+          cost: service?.cost || 0
+        };
+      }),
+      ...manualServices.map(ms => ({
+        serviceId: 'manual',
+        name: ms.name,
+        description: ms.description,
+        cost: ms.cost
+      }))
+    ];
+
+    const totalServicesCost = usedServices.reduce((acc, s) => acc + s.cost, 0);
     const notes = formData.get('notes') as string;
 
     const data: any = {
@@ -2557,8 +2802,9 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
       scheduledStartTime: formData.get('scheduledStartTime') as string,
       scheduledEndTime: formData.get('scheduledEndTime') as string,
       totalPartsCost,
-      totalLaborCost,
+      totalServicesCost,
       usedParts,
+      usedServices,
       notes
     };
 
@@ -2589,6 +2835,7 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
     
     setIsModalOpen(false);
     setSelectedParts([]);
+    setSelectedServices([]);
   };
 
   const handleEditMaintenance = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -2597,18 +2844,45 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
 
     const formData = new FormData(e.currentTarget);
     
-    const usedParts = selectedParts.map(sp => {
-      const part = equipmentParts.find(p => p.id === sp.partId);
-      return {
-        partId: sp.partId,
-        name: part?.name || '',
-        quantity: sp.quantity,
-        unitCost: part?.cost || 0
-      };
-    }).filter(p => p.quantity > 0);
+    const usedParts = [
+      ...selectedParts.map(sp => {
+        const part = equipmentParts.find(p => p.id === sp.partId);
+        return {
+          partId: sp.partId,
+          name: part?.name || '',
+          quantity: sp.quantity,
+          unitCost: part?.cost || 0
+        };
+      }),
+      ...manualParts.map(mp => ({
+        partId: 'manual',
+        name: mp.name,
+        quantity: mp.quantity,
+        unitCost: mp.unitCost
+      }))
+    ].filter(p => p.quantity > 0);
 
     const totalPartsCost = usedParts.reduce((acc, p) => acc + (p.quantity * p.unitCost), 0);
-    const totalLaborCost = Number(formData.get('totalLaborCost'));
+    
+    const usedServices = [
+      ...selectedServices.map(sid => {
+        const service = equipmentServices.find(s => s.id === sid);
+        return {
+          serviceId: sid,
+          name: service?.name || '',
+          description: service?.description || '',
+          cost: service?.cost || 0
+        };
+      }),
+      ...manualServices.map(ms => ({
+        serviceId: 'manual',
+        name: ms.name,
+        description: ms.description,
+        cost: ms.cost
+      }))
+    ];
+
+    const totalServicesCost = usedServices.reduce((acc, s) => acc + s.cost, 0);
     const manualDescription = formData.get('manualDescription') as string;
 
     const update: any = {
@@ -2622,8 +2896,9 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
       scheduledStartTime: formData.get('scheduledStartTime') as string,
       scheduledEndTime: formData.get('scheduledEndTime') as string,
       totalPartsCost,
-      totalLaborCost,
+      totalServicesCost,
       usedParts,
+      usedServices,
       notes: formData.get('notes') as string
     };
 
@@ -2631,13 +2906,46 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
     setIsEditModalOpen(false);
     setEditingRecord(null);
     setSelectedParts([]);
+    setSelectedServices([]);
   };
 
   const openEditModal = (record: MaintenanceRecord) => {
     setEditingRecord(record);
     setSelectedEquipId(record.equipmentId);
-    setSelectedParts(record.usedParts?.map(p => ({ partId: p.partId, quantity: p.quantity })) || []);
+    
+    const registeredParts = record.usedParts?.filter(p => p.partId !== 'manual') || [];
+    const manualPartsList = record.usedParts?.filter(p => p.partId === 'manual') || [];
+    
+    setSelectedParts(registeredParts.map(p => ({ partId: p.partId, quantity: p.quantity })));
+    setManualParts(manualPartsList.map(p => ({ name: p.name, quantity: p.quantity, unitCost: p.unitCost })));
+    
+    const registeredServices = record.usedServices?.filter(s => s.serviceId !== 'manual') || [];
+    const manualServicesList = record.usedServices?.filter(s => s.serviceId === 'manual') || [];
+    
+    setSelectedServices(registeredServices.map(s => s.serviceId));
+    setManualServices(manualServicesList.map(s => ({ name: s.name, description: s.description, cost: s.cost })));
+    
     setIsEditModalOpen(true);
+  };
+
+  const addManualPart = () => {
+    if (!newManualPart.name) return;
+    setManualParts(prev => [...prev, newManualPart]);
+    setNewManualPart({ name: '', quantity: 1, unitCost: 0 });
+  };
+
+  const removeManualPart = (index: number) => {
+    setManualParts(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const addManualService = () => {
+    if (!newManualService.name) return;
+    setManualServices(prev => [...prev, newManualService]);
+    setNewManualService({ name: '', description: '', cost: 0 });
+  };
+
+  const removeManualService = (index: number) => {
+    setManualServices(prev => prev.filter((_, i) => i !== index));
   };
 
   const handlePartQuantityChange = (partId: string, quantity: number) => {
@@ -2858,7 +3166,7 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
                       </Button>
                     </div>
                   )}
-                  {user.role !== 'operator' && user.role !== 'supervisor' && (
+                  {user.role !== 'operator' && (
                     <button 
                       onClick={() => onDeleteRecord(record.id)}
                       className="p-2 text-zinc-300 hover:text-red-500 transition-colors"
@@ -2881,6 +3189,9 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
           setSelectedEquipId('');
           setSelectedPlanId('');
           setSelectedParts([]);
+          setSelectedServices([]);
+          setManualParts([]);
+          setManualServices([]);
         }} 
         title="Iniciar Nova Manutenção"
       >
@@ -3002,10 +3313,7 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
           </div>
 
           <div className="space-y-4 border-t border-zinc-100 pt-4">
-            <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Peças e Custos</h4>
-            {user.role !== 'operator' && (
-              <Input label="Valor Mão de Obra (R$)" name="totalLaborCost" type="number" step="0.01" defaultValue="0" />
-            )}
+            <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Peças e Serviços</h4>
             
             <div className="space-y-2">
               <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Peças Cadastradas</p>
@@ -3033,6 +3341,142 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
                 </div>
               ) : (
                 <p className="text-xs text-zinc-400 italic">Nenhuma peça cadastrada para este equipamento.</p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Serviços e Mão de Obra</p>
+              {equipmentServices.length > 0 ? (
+                <div className="space-y-2 max-h-48 overflow-y-auto pr-2">
+                  {equipmentServices.map(service => {
+                    const isSelected = selectedServices.includes(service.id);
+                    return (
+                      <div key={service.id} className="flex items-center justify-between p-3 bg-zinc-50 rounded-lg border border-zinc-100">
+                        <div className="flex-1">
+                          <p className="text-sm font-bold">{service.name}</p>
+                          <p className="text-[10px] text-zinc-400 uppercase font-bold">{service.description}</p>
+                          {user.role !== 'operator' && (
+                            <p className="text-[10px] text-zinc-600 font-bold">R$ {service.cost.toFixed(2)}</p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <input 
+                            type="checkbox" 
+                            checked={isSelected}
+                            className="w-5 h-5 rounded border-zinc-300 text-black focus:ring-black"
+                            onChange={(e) => {
+                              if (e.target.checked) setSelectedServices(prev => [...prev, service.id]);
+                              else setSelectedServices(prev => prev.filter(id => id !== service.id));
+                            }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-xs text-zinc-400 italic">Nenhum serviço cadastrado para este equipamento.</p>
+              )}
+            </div>
+
+            {/* Manual Parts */}
+            <div className="space-y-2 pt-2 border-t border-zinc-50">
+              <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Peças Avulsas (Não Cadastradas)</p>
+              <div className="grid grid-cols-12 gap-2">
+                <div className="col-span-6">
+                  <Input 
+                    placeholder="Nome da peça" 
+                    value={newManualPart.name} 
+                    onChange={(e: any) => setNewManualPart({ ...newManualPart, name: e.target.value })}
+                  />
+                </div>
+                <div className="col-span-2">
+                  <Input 
+                    type="number" 
+                    placeholder="Qtd" 
+                    value={newManualPart.quantity} 
+                    onChange={(e: any) => setNewManualPart({ ...newManualPart, quantity: Number(e.target.value) })}
+                  />
+                </div>
+                <div className="col-span-3">
+                  <Input 
+                    type="number" 
+                    placeholder="Custo" 
+                    value={newManualPart.unitCost} 
+                    onChange={(e: any) => setNewManualPart({ ...newManualPart, unitCost: Number(e.target.value) })}
+                  />
+                </div>
+                <div className="col-span-1 flex items-end pb-1">
+                  <button 
+                    type="button"
+                    onClick={addManualPart}
+                    className="p-2 bg-zinc-900 text-white rounded-lg hover:bg-black transition-all"
+                  >
+                    <Plus size={16} />
+                  </button>
+                </div>
+              </div>
+              {manualParts.length > 0 && (
+                <div className="space-y-1 mt-2">
+                  {manualParts.map((p, i) => (
+                    <div key={i} className="flex items-center justify-between p-2 bg-blue-50 rounded-lg border border-blue-100 text-xs">
+                      <span className="font-bold text-blue-900">{p.name} (x{p.quantity}) - R$ {p.unitCost.toFixed(2)}</span>
+                      <button type="button" onClick={() => removeManualPart(i)} className="text-red-500 hover:text-red-700">
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Manual Services */}
+            <div className="space-y-2 pt-2 border-t border-zinc-50">
+              <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Serviços Avulsos (Não Cadastrados)</p>
+              <div className="grid grid-cols-12 gap-2">
+                <div className="col-span-4">
+                  <Input 
+                    placeholder="Nome do serviço" 
+                    value={newManualService.name} 
+                    onChange={(e: any) => setNewManualService({ ...newManualService, name: e.target.value })}
+                  />
+                </div>
+                <div className="col-span-4">
+                  <Input 
+                    placeholder="Descrição" 
+                    value={newManualService.description} 
+                    onChange={(e: any) => setNewManualService({ ...newManualService, description: e.target.value })}
+                  />
+                </div>
+                <div className="col-span-3">
+                  <Input 
+                    type="number" 
+                    placeholder="Custo" 
+                    value={newManualService.cost} 
+                    onChange={(e: any) => setNewManualService({ ...newManualService, cost: Number(e.target.value) })}
+                  />
+                </div>
+                <div className="col-span-1 flex items-end pb-1">
+                  <button 
+                    type="button"
+                    onClick={addManualService}
+                    className="p-2 bg-zinc-900 text-white rounded-lg hover:bg-black transition-all"
+                  >
+                    <Plus size={16} />
+                  </button>
+                </div>
+              </div>
+              {manualServices.length > 0 && (
+                <div className="space-y-1 mt-2">
+                  {manualServices.map((s, i) => (
+                    <div key={i} className="flex items-center justify-between p-2 bg-emerald-50 rounded-lg border border-emerald-100 text-xs">
+                      <span className="font-bold text-emerald-900">{s.name} - R$ {s.cost.toFixed(2)}</span>
+                      <button type="button" onClick={() => removeManualService(i)} className="text-red-500 hover:text-red-700">
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
 
@@ -3122,6 +3566,9 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
           setIsEditModalOpen(false);
           setEditingRecord(null);
           setSelectedParts([]);
+          setSelectedServices([]);
+          setManualParts([]);
+          setManualServices([]);
         }} 
         title="Editar Manutenção em Progresso"
       >
@@ -3226,16 +3673,7 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
             </div>
 
             <div className="space-y-4 border-t border-zinc-100 pt-4">
-              <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Peças e Custos</h4>
-              {user.role !== 'operator' && (
-                <Input 
-                  label="Valor Mão de Obra (R$)" 
-                  name="totalLaborCost" 
-                  type="number" 
-                  step="0.01" 
-                  defaultValue={editingRecord.totalLaborCost || 0} 
-                />
-              )}
+              <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Peças e Serviços</h4>
               
               <div className="space-y-2">
                 <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Peças Utilizadas</p>
@@ -3265,6 +3703,142 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
                   <p className="text-xs text-zinc-400 italic">Nenhuma peça cadastrada para este equipamento.</p>
                 )}
               </div>
+
+              <div className="space-y-2">
+                <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Serviços e Mão de Obra</p>
+                {equipmentServices.length > 0 ? (
+                  <div className="space-y-2 max-h-48 overflow-y-auto pr-2">
+                    {equipmentServices.map(service => {
+                      const isSelected = selectedServices.includes(service.id);
+                      return (
+                        <div key={service.id} className="flex items-center justify-between p-3 bg-zinc-50 rounded-lg border border-zinc-100">
+                          <div className="flex-1">
+                            <p className="text-sm font-bold">{service.name}</p>
+                            <p className="text-[10px] text-zinc-400 uppercase font-bold">{service.description}</p>
+                            {user.role !== 'operator' && (
+                              <p className="text-[10px] text-zinc-600 font-bold">R$ {service.cost.toFixed(2)}</p>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <input 
+                              type="checkbox" 
+                              checked={isSelected}
+                              className="w-5 h-5 rounded border-zinc-300 text-black focus:ring-black"
+                              onChange={(e) => {
+                                if (e.target.checked) setSelectedServices(prev => [...prev, service.id]);
+                                else setSelectedServices(prev => prev.filter(id => id !== service.id));
+                              }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-xs text-zinc-400 italic">Nenhum serviço cadastrado para este equipamento.</p>
+                )}
+              </div>
+
+              {/* Manual Parts */}
+              <div className="space-y-2 pt-2 border-t border-zinc-50">
+                <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Peças Avulsas (Não Cadastradas)</p>
+                <div className="grid grid-cols-12 gap-2">
+                  <div className="col-span-6">
+                    <Input 
+                      placeholder="Nome da peça" 
+                      value={newManualPart.name} 
+                      onChange={(e: any) => setNewManualPart({ ...newManualPart, name: e.target.value })}
+                    />
+                  </div>
+                  <div className="col-span-2">
+                    <Input 
+                      type="number" 
+                      placeholder="Qtd" 
+                      value={newManualPart.quantity} 
+                      onChange={(e: any) => setNewManualPart({ ...newManualPart, quantity: Number(e.target.value) })}
+                    />
+                  </div>
+                  <div className="col-span-3">
+                    <Input 
+                      type="number" 
+                      placeholder="Custo" 
+                      value={newManualPart.unitCost} 
+                      onChange={(e: any) => setNewManualPart({ ...newManualPart, unitCost: Number(e.target.value) })}
+                    />
+                  </div>
+                  <div className="col-span-1 flex items-end pb-1">
+                    <button 
+                      type="button"
+                      onClick={addManualPart}
+                      className="p-2 bg-zinc-900 text-white rounded-lg hover:bg-black transition-all"
+                    >
+                      <Plus size={16} />
+                    </button>
+                  </div>
+                </div>
+                {manualParts.length > 0 && (
+                  <div className="space-y-1 mt-2">
+                    {manualParts.map((p, i) => (
+                      <div key={i} className="flex items-center justify-between p-2 bg-blue-50 rounded-lg border border-blue-100 text-xs">
+                        <span className="font-bold text-blue-900">{p.name} (x{p.quantity}) - R$ {p.unitCost.toFixed(2)}</span>
+                        <button type="button" onClick={() => removeManualPart(i)} className="text-red-500 hover:text-red-700">
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Manual Services */}
+              <div className="space-y-2 pt-2 border-t border-zinc-50">
+                <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Serviços Avulsos (Não Cadastrados)</p>
+                <div className="grid grid-cols-12 gap-2">
+                  <div className="col-span-4">
+                    <Input 
+                      placeholder="Nome do serviço" 
+                      value={newManualService.name} 
+                      onChange={(e: any) => setNewManualService({ ...newManualService, name: e.target.value })}
+                    />
+                  </div>
+                  <div className="col-span-4">
+                    <Input 
+                      placeholder="Descrição" 
+                      value={newManualService.description} 
+                      onChange={(e: any) => setNewManualService({ ...newManualService, description: e.target.value })}
+                    />
+                  </div>
+                  <div className="col-span-3">
+                    <Input 
+                      type="number" 
+                      placeholder="Custo" 
+                      value={newManualService.cost} 
+                      onChange={(e: any) => setNewManualService({ ...newManualService, cost: Number(e.target.value) })}
+                    />
+                  </div>
+                  <div className="col-span-1 flex items-end pb-1">
+                    <button 
+                      type="button"
+                      onClick={addManualService}
+                      className="p-2 bg-zinc-900 text-white rounded-lg hover:bg-black transition-all"
+                    >
+                      <Plus size={16} />
+                    </button>
+                  </div>
+                </div>
+                {manualServices.length > 0 && (
+                  <div className="space-y-1 mt-2">
+                    {manualServices.map((s, i) => (
+                      <div key={i} className="flex items-center justify-between p-2 bg-emerald-50 rounded-lg border border-emerald-100 text-xs">
+                        <span className="font-bold text-emerald-900">{s.name} - R$ {s.cost.toFixed(2)}</span>
+                        <button type="button" onClick={() => removeManualService(i)} className="text-red-500 hover:text-red-700">
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="space-y-4 border-t border-zinc-100 pt-4">
@@ -3282,6 +3856,7 @@ function MaintenanceSection({ equipment, records, user, onDeleteRecord, searchTe
                 setIsEditModalOpen(false);
                 setEditingRecord(null);
                 setSelectedParts([]);
+                setSelectedServices([]);
               }}>Cancelar</Button>
               <Button type="submit">Salvar Alterações</Button>
             </div>
@@ -3364,7 +3939,7 @@ function ReportsSection({ equipment, records, user, onDeleteRecord, searchTerm, 
     return matchesDate && matchesEquip && matchesStatus && matchesSearch;
   });
   
-  const totalCost = filteredRecords.reduce((acc, r) => acc + (r.totalPartsCost || 0) + (r.totalLaborCost || 0), 0);
+  const totalCost = filteredRecords.reduce((acc, r) => acc + (r.totalPartsCost || 0) + (r.totalServicesCost || 0), 0);
   const isOperator = user.role === 'operator';
 
   const handleExportPDF = async () => {
@@ -3419,58 +3994,59 @@ function ReportsSection({ equipment, records, user, onDeleteRecord, searchTerm, 
 
     // Header
     doc.setFillColor(240, 240, 240);
-    doc.rect(0, 0, 210, 30, 'F');
+    doc.rect(0, 0, 210, 15, 'F');
     doc.setTextColor(0, 0, 0);
-    doc.setFontSize(20);
+    doc.setFontSize(14);
     doc.setFont('helvetica', 'bold');
-    doc.text(companyName !== 'Várias' && companyName !== 'N/A' ? companyName : 'GIGA Plan Promaq', 14, 12);
-    doc.setFontSize(12);
+    doc.text(companyName !== 'Várias' && companyName !== 'N/A' ? companyName : 'GIGA Plan Promaq', 14, 6);
+    doc.setFontSize(8);
     doc.setFont('helvetica', 'normal');
-    doc.text('Relatório de Manutenções Realizadas', 14, 22);
+    doc.text('Relatório de Manutenções Realizadas', 14, 11);
     
     doc.setTextColor(60, 60, 60);
-    doc.setFontSize(8);
-    doc.text('GIGA Plan Promaq', 160, 8);
-    doc.setFontSize(9);
-    doc.text(`Período: ${filterDate}`, 160, 15);
-    doc.text(`Gerado em: ${format(new Date(), 'dd/MM/yyyy HH:mm')}`, 160, 22);
+    doc.setFontSize(6);
+    doc.text('GIGA Plan Promaq', 160, 5);
+    doc.setFontSize(7);
+    doc.text(`Período: ${filterDate}`, 160, 9);
+    doc.text(`Gerado em: ${format(new Date(), 'dd/MM/yyyy HH:mm')}`, 160, 13);
 
     doc.setTextColor(0, 0, 0);
-    doc.setFontSize(11);
+    doc.setFontSize(9);
     doc.setFont('helvetica', 'bold');
-    doc.text('Filtros Aplicados:', 14, 40);
+    doc.text('Filtros Aplicados:', 14, 22);
+    doc.setFontSize(8);
     doc.setFont('helvetica', 'normal');
-    doc.text(`Equipamento: ${equipName}`, 14, 46);
-    doc.text(`Empresa: ${companyName}`, 14, 52);
-    doc.text(`Status: ${statusFilter === 'all' ? 'Todos' : statusFilter}`, 14, 58);
+    doc.text(`Equipamento: ${equipName}`, 14, 27);
+    doc.text(`Empresa: ${companyName}`, 14, 32);
+    doc.text(`Status: ${statusFilter === 'all' ? 'Todos' : statusFilter}`, 14, 37);
 
     // Equipment Photo in Report Header if single equipment
     if (selectedEquip?.photoUrl) {
       try {
         const imgData = await getImageData(selectedEquip.photoUrl);
-        doc.addImage(imgData, 'JPEG', 160, 35, 35, 35);
+        doc.addImage(imgData, 'JPEG', 160, 20, 30, 30);
         doc.setDrawColor(200);
-        doc.rect(160, 35, 35, 35);
+        doc.rect(160, 20, 30, 30);
       } catch (e) {
         console.warn('Could not add equipment photo to report', e);
       }
     }
     
     // Summary
-    doc.setFontSize(12);
-    doc.setFont('helvetica', 'bold');
-    doc.text(isOperator ? 'Resumo da Operação' : 'Resumo Financeiro', 14, 75);
     doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.text(isOperator ? 'Resumo da Operação' : 'Resumo Financeiro', 14, 50);
+    doc.setFontSize(8);
     doc.setFont('helvetica', 'normal');
-    doc.text(`Total de Intervenções: ${filteredRecords.length}`, 14, 82);
+    doc.text(`Total de Intervenções: ${filteredRecords.length}`, 14, 56);
     if (!isOperator) {
       doc.setFont('helvetica', 'bold');
-      doc.text(`Custo Total do Período: R$ ${totalCost.toLocaleString()}`, 14, 88);
+      doc.text(`Custo Total do Período: R$ ${totalCost.toLocaleString()}`, 14, 61);
     }
     
     const tableHead = isOperator 
       ? [['OS', 'Data Real', 'Programado', 'Equipamento', 'Manutenção', 'Status', 'Peças Utilizadas']]
-      : [['OS', 'Data Real', 'Programado', 'Equipamento', 'Manutenção', 'Status', 'Peças', 'M. Obra', 'Custo Peças', 'Total']];
+      : [['OS', 'Data Real', 'Programado', 'Equipamento', 'Manutenção', 'Status', 'Serviços', 'Peças', 'Total']];
 
     const tableBody = filteredRecords.map(r => {
       const base = [
@@ -3485,29 +4061,29 @@ function ReportsSection({ equipment, records, user, onDeleteRecord, searchTerm, 
       if (isOperator) return base;
       return [
         ...base,
-        `R$ ${(r.totalLaborCost || 0).toFixed(2)}`,
+        r.usedServices?.map(s => `${s.name} (R$ ${s.cost.toFixed(2)})`).join('\n') || 'Nenhum',
         r.usedParts?.map(p => `R$ ${(p.unitCost * p.quantity).toFixed(2)} (${p.quantity}x R$ ${p.unitCost.toFixed(2)})`).join('\n') + 
         (r.usedParts && r.usedParts.length > 0 ? `\n----------------\nTotal Peças: R$ ${r.totalPartsCost?.toFixed(2)}` : '\nR$ 0.00'),
-        `R$ ${((r.totalLaborCost || 0) + (r.totalPartsCost || 0)).toFixed(2)}`
+        `R$ ${((r.totalServicesCost || 0) + (r.totalPartsCost || 0)).toFixed(2)}`
       ];
     });
 
     // Table
-    doc.setFontSize(8);
+    doc.setFontSize(6);
     doc.setTextColor(0);
-    let y = 100;
+    let y = 70;
     
     // Header
     const colWidths = isOperator 
       ? [15, 20, 20, 30, 30, 22, 45] 
-      : [12, 16, 16, 20, 20, 15, 25, 15, 25, 18];
+      : [12, 16, 16, 20, 20, 15, 25, 35, 23];
     const headers = tableHead[0];
     
     const drawHeader = (currentY: number) => {
       doc.setFillColor(240, 240, 240);
       doc.rect(14, currentY - 5, 182, 8, 'F');
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(7.5);
+      doc.setFontSize(6.5);
       let headerX = 14;
       headers.forEach((h, i) => {
         doc.text(h, headerX, currentY, { maxWidth: colWidths[i] - 1 });
@@ -3561,7 +4137,7 @@ function ReportsSection({ equipment, records, user, onDeleteRecord, searchTerm, 
     const pageCount = doc.getNumberOfPages();
     for (let i = 1; i <= pageCount; i++) {
       doc.setPage(i);
-      doc.setFontSize(8);
+      doc.setFontSize(7);
       doc.setTextColor(150);
       const footerText = 'Desenvolvedor: Giga Elétrica | Contato: 43 996118806 | Joaquim Távora - PR';
       const pageSize = doc.internal.pageSize;
@@ -3633,7 +4209,7 @@ function ReportsSection({ equipment, records, user, onDeleteRecord, searchTerm, 
               <th className="p-4 text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Peças Detalhadas</th>
               {!isOperator && (
                 <>
-                  <th className="p-4 text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Mão de Obra</th>
+                  <th className="p-4 text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Serviços</th>
                   <th className="p-4 text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Peças (R$)</th>
                   <th className="p-4 text-[10px] font-bold text-zinc-400 uppercase tracking-widest text-right">Total</th>
                 </>
@@ -3675,7 +4251,7 @@ function ReportsSection({ equipment, records, user, onDeleteRecord, searchTerm, 
                 </td>
                 {!isOperator && (
                   <>
-                    <td className="p-4 text-sm">R$ {record.totalLaborCost?.toFixed(2) || '0.00'}</td>
+                    <td className="p-4 text-sm">R$ {record.totalServicesCost?.toFixed(2) || '0.00'}</td>
                     <td className="p-4 text-sm">
                       {record.usedParts && record.usedParts.length > 0 ? (
                         <div className="space-y-1">
@@ -3693,11 +4269,11 @@ function ReportsSection({ equipment, records, user, onDeleteRecord, searchTerm, 
                         <span>R$ 0.00</span>
                       )}
                     </td>
-                    <td className="p-4 text-sm font-bold text-right">R$ {((record.totalLaborCost || 0) + (record.totalPartsCost || 0)).toFixed(2)}</td>
+                    <td className="p-4 text-sm font-bold text-right">R$ {((record.totalServicesCost || 0) + (record.totalPartsCost || 0)).toFixed(2)}</td>
                   </>
                 )}
                 <td className="p-4 text-center">
-                  {user.role !== 'operator' && user.role !== 'supervisor' && (
+                  {user.role !== 'operator' && (
                     <button 
                       onClick={() => onDeleteRecord(record.id)}
                       className="text-zinc-300 hover:text-red-500 transition-colors"
@@ -3772,10 +4348,6 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
       showToast('Somente administradores podem gerenciar o nível de acesso de administrador.', 'error');
       return;
     }
-    if (user.role === 'supervisor' && (targetUser?.role !== 'operator' || newRole !== 'operator')) {
-      showToast('Supervisores só podem gerenciar operadores.', 'error');
-      return;
-    }
     await updateDoc(doc(db, 'users', uid), { role: newRole });
   };
 
@@ -3791,10 +4363,6 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
     const userToDelete = users.find(u => u.uid === uid);
     if (user.role !== 'admin' && userToDelete?.role === 'admin') {
       showToast('Somente administradores podem excluir outros administradores.', 'error');
-      return;
-    }
-    if (user.role === 'supervisor' && userToDelete?.role !== 'operator') {
-      showToast('Supervisores só podem excluir operadores.', 'error');
       return;
     }
     setConfirmModal({
@@ -3824,10 +4392,6 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
     }
     if (user.role !== 'admin' && newUser.role === 'admin') {
       showToast('Somente administradores podem cadastrar outros administradores.', 'error');
-      return;
-    }
-    if (user.role === 'supervisor' && newUser.role !== 'operator') {
-      showToast('Supervisores só podem cadastrar operadores.', 'error');
       return;
     }
     setLoading(true);
@@ -3881,10 +4445,6 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
     }
     if (user.role !== 'admin' && editingUser.role === 'admin') {
       showToast('Somente administradores podem editar outros administradores.', 'error');
-      return;
-    }
-    if (user.role === 'supervisor' && editingUser.role !== 'operator') {
-      showToast('Supervisores só podem editar operadores.', 'error');
       return;
     }
     setLoading(true);
@@ -3973,8 +4533,7 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
               { value: 'operator', label: 'Operador' }
             ].filter(opt => {
               if (user.role === 'admin') return true;
-              if (user.role === 'gestor') return opt.value !== 'admin';
-              if (user.role === 'supervisor') return opt.value === 'operator';
+              if (user.role === 'gestor' || user.role === 'supervisor') return opt.value !== 'admin';
               return false;
             })}
           />
@@ -4052,8 +4611,7 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
                 { value: 'operator', label: 'Operador' }
               ].filter(opt => {
                 if (user.role === 'admin') return true;
-                if (user.role === 'gestor') return opt.value !== 'admin';
-                if (user.role === 'supervisor') return opt.value === 'operator';
+                if (user.role === 'gestor' || user.role === 'supervisor') return opt.value !== 'admin';
                 return false;
               })}
               disabled={user.role !== 'admin' && editingUser.role === 'admin'}
@@ -4105,7 +4663,7 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
                   </div>
                 )}
               </div>
-              {(user.role === 'admin' || (user.role === 'gestor' && u.role !== 'admin') || (user.role === 'supervisor' && u.role === 'operator')) && (
+              {(user.role === 'admin' || ((user.role === 'gestor' || user.role === 'supervisor') && u.role !== 'admin')) && (
                 <div className="flex items-center gap-1">
                   <button 
                     onClick={() => {
@@ -4146,7 +4704,7 @@ function UsersSection({ user, searchTerm, showToast, setConfirmModal, sendAlert 
                   if (user.role === 'supervisor') return opt.value === 'operator';
                   return false;
                 })}
-                disabled={u.uid === user.uid || (user.role !== 'admin' && user.role !== 'gestor' && user.role !== 'supervisor') || (user.role !== 'admin' && u.role === 'admin') || (user.role === 'supervisor' && u.role !== 'operator')}
+                disabled={u.uid === user.uid || (user.role !== 'admin' && user.role !== 'gestor' && user.role !== 'supervisor') || (user.role !== 'admin' && u.role === 'admin')}
               />
             </div>
           </Card>
